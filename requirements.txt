@@ -1,0 +1,20 @@
+# Production Manager Dependencies
+# Python 3.10+ required
+
+# GUI Framework
+PyQt6>=6.6.0
+
+# Database ORM
+SQLAlchemy>=2.0.0
+
+# Environment variables management
+python-dotenv>=1.0.0
+
+# Data visualization
+matplotlib>=3.8.0
+
+# PostgreSQL adapter (optional, for production)
+psycopg2-binary>=2.9.0
+
+# Build tool
+pyinstaller>=6.0.0
