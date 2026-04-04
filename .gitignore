@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual env
+.venv/
+venv/
+
+# Env secrets (keep example)
+.env
+
+# PyInstaller
+build/
+dist/
+
+# IDE / OS
+.vscode/
+.idea/
+.cursor/
+Thumbs.db
+.DS_Store
+
+# DB (не заливать базу с реальными данными)
+*.sqlite3
+
+# Chat logs
+*.txt
