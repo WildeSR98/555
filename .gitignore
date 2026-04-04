@@ -1,1 +1,1 @@
-Nothing should be ignored since only a Python source file (`migrate_to_postgres.py`) was added, which is a regular source code file that should be tracked in version control.
+Nothing should be ignored based on the provided file changes, as they only include source/config files (.md and .py files).
