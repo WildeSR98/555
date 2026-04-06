@@ -1,1 +1,29 @@
-Nothing should be ignored based on the provided file changes, as they only include source/config files (.md and .py files).
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual env
+.venv/
+venv/
+
+# Env secrets
+.env
+
+# PyInstaller
+build/
+dist/
+
+# IDE / OS
+.vscode/
+.idea/
+.cursor/
+Thumbs.db
+.DS_Store
+
+# DB (не заливать базу с реальными данными)
+*.sqlite3
+
+# Chat logs
+*.txt
