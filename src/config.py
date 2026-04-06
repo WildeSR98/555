@@ -30,8 +30,8 @@ class DatabaseConfig:
     db_host: str = 'localhost'
     db_port: int = 5432
     db_name: str = 'production_db'
-    db_user: str = ''
-    db_password: str = ''
+    db_user: str = 'prod_user'
+    db_password: str = 'strong_password_here'
     pool_min: int = 1
     pool_max: int = 40
     connect_timeout: int = 30

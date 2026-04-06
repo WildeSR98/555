@@ -164,6 +164,8 @@ class Project(Base):
     created_at = Column(DateTime)
     updated_at = Column(DateTime)
     deadline = Column(Date, nullable=True)
+    spec_link = Column(String(500), nullable=True)
+    spec_code = Column(String(100), nullable=True)
 
     # Relationships
     manager = relationship('User', foreign_keys=[manager_id])
@@ -237,7 +239,7 @@ class Device(Base):
     is_semifinished = Column(Boolean, default=False)
     location = Column(String(200), default='')
     current_worker_id = Column(Integer, ForeignKey('accounts_user.id'), nullable=True)
-    status = Column(String(20), default='ACTIVE', index=True)
+    status = Column(String(20), default='WAITING_KITTING', index=True)
     description = Column(Text, default='')
     created_at = Column(DateTime)
     updated_at = Column(DateTime)
@@ -273,7 +275,11 @@ class Device(Base):
         'ACTIVE': 'Активно', 'INACTIVE': 'Неактивно',
         'MAINTENANCE': 'На обслуживании', 'BROKEN': 'Неисправно',
         'RETIRED': 'Списано',
-        'PRE_PRODUCTION': 'Подготовка', 'ASSEMBLY': 'Сборка',
+        'WAITING_KITTING': 'Ожидание комплектовки',
+        'PRE_PRODUCTION': 'Подготовка',
+        'WAITING_ASSEMBLY': 'Ожидание сборки',
+        'ASSEMBLY': 'Сборка',
+        'WAITING_VIBROSTAND': 'Ожидание вибростенда',
         'VIBROSTAND': 'Вибростенд',
         'TECH_CONTROL_1_1': 'Тех. контроль 1.1',
         'TECH_CONTROL_1_2': 'Тех. контроль 1.2',
@@ -283,19 +289,27 @@ class Device(Base):
         'QC_PASSED': 'Контроль пройден',
         'DEFECT': 'Брак', 'WAITING_PARTS': 'Ожидание запчастей',
         'WAITING_SOFTWARE': 'Ожидание ПО',
+        'WAITING_PACKING': 'Ожидание упаковки',
         'PACKING': 'Упаковка', 'ACCOUNTING': 'Учёт',
+        'WAREHOUSE': 'Склад (Завершено)',
         'SHIPPED': 'Отгружено',
     }
 
     STATUS_COLORS = {
-        'PRE_PRODUCTION': '#6c757d', 'ASSEMBLY': '#007bff',
+        'WAITING_KITTING': '#94a3b8',
+        'PRE_PRODUCTION': '#6c757d',
+        'WAITING_ASSEMBLY': '#94a3b8',
+        'ASSEMBLY': '#007bff',
+        'WAITING_VIBROSTAND': '#94a3b8',
         'VIBROSTAND': '#17a2b8',
         'TECH_CONTROL_1_1': '#ffc107', 'TECH_CONTROL_1_2': '#ffc107',
         'TECH_CONTROL_2_1': '#ffc107', 'TECH_CONTROL_2_2': '#ffc107',
         'FUNC_CONTROL': '#fd7e14',
+        'WAITING_PACKING': '#94a3b8',
         'QC_PASSED': '#28a745', 'DEFECT': '#dc3545',
         'WAITING_PARTS': '#f59e0b', 'WAITING_SOFTWARE': '#f59e0b',
         'PACKING': '#20c997', 'ACCOUNTING': '#6f42c1',
+        'WAREHOUSE': '#22c55e',
         'SHIPPED': '#198754',
         'ACTIVE': '#28a745', 'INACTIVE': '#6c757d',
         'MAINTENANCE': '#ffc107', 'BROKEN': '#dc3545', 'RETIRED': '#343a40',
@@ -303,11 +317,13 @@ class Device(Base):
 
     # Порядок этапов конвейера
     PIPELINE_STAGES = [
-        'PRE_PRODUCTION', 'ASSEMBLY', 'VIBROSTAND',
+        'WAITING_KITTING', 'PRE_PRODUCTION', 'WAITING_ASSEMBLY',
+        'ASSEMBLY', 'WAITING_VIBROSTAND', 'VIBROSTAND',
         'TECH_CONTROL_1_1', 'TECH_CONTROL_1_2',
         'FUNC_CONTROL',
         'TECH_CONTROL_2_1', 'TECH_CONTROL_2_2',
-        'PACKING', 'ACCOUNTING', 'QC_PASSED',
+        'WAITING_PACKING', 'PACKING', 'ACCOUNTING',
+        'WAREHOUSE', 'QC_PASSED',
         'DEFECT', 'WAITING_PARTS', 'WAITING_SOFTWARE',
     ]
 

@@ -139,6 +139,10 @@ class ProjectsTab(QWidget):
         
         code_input = QLineEdit()
         name_input = QLineEdit()
+        spec_link_input = QLineEdit()
+        spec_link_input.setPlaceholderText('https://...')
+        spec_code_input = QLineEdit()
+        spec_code_input.setPlaceholderText('Код из документации')
         
         manager_combo = QComboBox()
         manager_combo.addItem('— Без менеджера —', None)
@@ -153,6 +157,8 @@ class ProjectsTab(QWidget):
             
         form.addRow('Код проекта:', code_input)
         form.addRow('Название (обязательно):', name_input)
+        form.addRow('Ссылка на спеку:', spec_link_input)
+        form.addRow('Проверочный код:', spec_code_input)
         form.addRow('Менеджер:', manager_combo)
         main_layout.addWidget(info_group)
         
@@ -246,6 +252,8 @@ class ProjectsTab(QWidget):
                 new_proj = Project(
                     name=name,
                     code=code if code else None,
+                    spec_link=spec_link_input.text().strip() or None,
+                    spec_code=spec_code_input.text().strip() or None,
                     status='PLANNING',
                     manager_id=manager_id,
                     created_at=datetime.now(),
@@ -456,6 +464,8 @@ class ProjectsTab(QWidget):
                         ('Код', project.code),
                         ('Название', project.name),
                         ('Статус', project.status_display),
+                        ('Спецификация', project.spec_link or '—'),
+                        ('Код подтверждения', project.spec_code or '—'),
                         ('Менеджер', project.manager.full_name if project.manager else '—'),
                         ('Дедлайн', str(project.deadline) if project.deadline else '—'),
                         ('Создан', project.created_at.strftime('%d.%m.%Y %H:%M') if project.created_at else '—'),

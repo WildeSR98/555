@@ -16,8 +16,10 @@ from datetime import datetime
 
 from ..database import get_session
 from ..models import (
-    Workplace, WorkSession, WorkLog, Device, User
+    Workplace, WorkSession, WorkLog, Device, User, Project
 )
+from ..logic.workflow import WorkflowEngine
+from .widgets.scan_in_dialog import ScanInDialog
 from .styles import COLORS
 
 
@@ -335,7 +337,14 @@ class ScanTab(QWidget):
                 self._end_session()
                 return
 
+            limit = WorkflowEngine.get_batch_limit(self.current_workplace.workplace_type)
+            
             for s in sn_raw.split():
+                if len(self.scanned_sns) >= limit:
+                    self.sn_status.setText(f'❌ Лимит партии для этого поста: {limit} шт.')
+                    self.sn_status.setStyleSheet(f'color: {COLORS["error"]};')
+                    break
+
                 if s not in self.scanned_sns:
                     self.scanned_sns.append(s)
                     self.batch_list.addItem(f"✅ {s}")
@@ -394,37 +403,64 @@ class ScanTab(QWidget):
 
             self.current_devices = valid_devices
 
+            # Группируем по типу: те, что уже "В работе" на этом посту, и те, что только принимаются
+            to_scan_in = []
+            already_in = []
+            
             for device in self.current_devices:
-                old_status = device.status
-                if workplace.device_status_on_enter:
-                    device.status = workplace.device_status_on_enter
+                # Если статус "WAITING_..." или устройство еще не на этом этапе
+                if device.status.startswith('WAITING_') or device.status != workplace.workplace_type:
+                    to_scan_in.append(device)
+                else:
+                    already_in.append(device)
 
-                device.current_worker_id = self.current_worker.id
+            # Если есть те, кого надо принять в работу - открываем диалог (SCAN_IN)
+            if to_scan_in:
+                # Берем проект первого устройства (предполагаем, что в партии один проект)
+                project = session.query(Project).get(to_scan_in[0].project_id)
+                dialog = ScanInDialog(to_scan_in, project, self)
+                if dialog.exec():
+                    # Принимаем в работу
+                    for device in to_scan_in:
+                        old_status = device.status
+                        device.status = workplace.workplace_type
+                        device.current_worker_id = self.current_worker.id
+                        device.updated_at = datetime.now()
 
-                log = WorkLog(
-                    worker_id=self.current_worker.id,
-                    session_id=self.current_session.id,
-                    workplace_id=self.current_workplace.id,
-                    device_id=device.id,
-                    project_id=device.project_id,
-                    action='SCAN_IN',
-                    old_status=old_status,
-                    new_status=device.status,
-                    part_number=device.part_number or '',
-                    serial_number=device.serial_number or '',
-                    created_at=datetime.now()
-                )
-                session.add(log)
-                
-            session.commit()
+                        log = WorkLog(
+                            worker_id=self.current_worker.id,
+                            session_id=self.current_session.id,
+                            workplace_id=self.current_workplace.id,
+                            device_id=device.id,
+                            project_id=device.project_id,
+                            action='SCAN_IN',
+                            old_status=old_status,
+                            new_status=device.status,
+                            part_number=device.part_number or '',
+                            serial_number=device.serial_number or '',
+                            created_at=datetime.now()
+                        )
+                        session.add(log)
+                    session.commit()
+                    QMessageBox.information(self, 'Успех', f'{len(to_scan_in)} устр. приняты в работу.')
+                    
+                    # После ввода кода - возврат в меню сканирования (как просил пользователь)
+                    session.close()
+                    self._reset_to_sn()
+                    return
+                else:
+                    # Отмена диалога
+                    session.close()
+                    return
 
+            # Если все уже в работе - переходим к действиям (Шаг 3)
             self.step3_info.setText(
                 f'👤 {self.current_worker.full_name}  ·  '
                 f'🏭 {self.current_workplace.name}  ·  '
-                f'📦 Устройств в партии: {len(self.current_devices)}'
+                f'📦 Устройств в работе: {len(self.current_devices)}'
             )
             
-            details = "<b>Отсканированные системы:</b><br>"
+            details = "<b>Активные системы:</b><br>"
             for i, d in enumerate(self.current_devices):
                 if i < 10:
                     details += f"— SN: {d.serial_number} ({d.name}) [Статус: {d.status}]<br>"
@@ -442,16 +478,21 @@ class ScanTab(QWidget):
 
     def _do_action(self, action: str) -> None:
         STATUS_MAP = {
-            'PRE_PRODUCTION': 'ASSEMBLY',
-            'ASSEMBLY': 'VIBROSTAND',
+            'WAITING_KITTING': 'PRE_PRODUCTION',
+            'PRE_PRODUCTION': 'WAITING_ASSEMBLY',
+            'WAITING_ASSEMBLY': 'ASSEMBLY',
+            'ASSEMBLY': 'WAITING_VIBROSTAND',
+            'WAITING_VIBROSTAND': 'VIBROSTAND',
             'VIBROSTAND': 'TECH_CONTROL_1_1',
             'TECH_CONTROL_1_1': 'TECH_CONTROL_1_2',
             'TECH_CONTROL_1_2': 'FUNC_CONTROL',
             'FUNC_CONTROL': 'TECH_CONTROL_2_1',
             'TECH_CONTROL_2_1': 'TECH_CONTROL_2_2',
-            'TECH_CONTROL_2_2': 'PACKING',
+            'TECH_CONTROL_2_2': 'WAITING_PACKING',
+            'WAITING_PACKING': 'PACKING',
             'PACKING': 'ACCOUNTING',
-            'ACCOUNTING': 'QC_PASSED',
+            'ACCOUNTING': 'WAREHOUSE',
+            'WAREHOUSE': 'QC_PASSED',
         }
 
         try:
@@ -462,8 +503,31 @@ class ScanTab(QWidget):
                 device = session.query(Device).get(d.id)
                 old_status = device.status
 
+                # Проверка кулдауна и маршрута через WorkflowEngine
+                last_log = session.query(WorkLog).filter(
+                    WorkLog.device_id == device.id
+                ).order_by(WorkLog.created_at.desc()).first()
+                
+                # Определяем целевой статус для проверки
+                target_status = old_status
                 if action == 'complete':
-                    new_status = STATUS_MAP.get(workplace.workplace_type, 'QC_PASSED')
+                    target_status = STATUS_MAP.get(old_status, 'QC_PASSED')
+                elif action == 'defect':
+                    target_status = 'DEFECT'
+                elif action == 'in_progress':
+                    target_status = workplace.workplace_type
+
+                can_proceed, err_msg = WorkflowEngine.can_change_status(
+                    device, target_status, self.user, last_log
+                )
+                
+                if not can_proceed:
+                    QMessageBox.warning(self, 'Ограничение', f'Устройство {device.serial_number}: {err_msg}')
+                    session.close()
+                    return
+
+                if action == 'complete':
+                    new_status = target_status
                     device.status = new_status
                     device.current_worker_id = None
                     action_type = 'COMPLETED'
