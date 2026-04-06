@@ -7,20 +7,22 @@
 ## 📋 Содержание
 
 1. [Что понадобится](#-что-понадобится)
-2. [Установка PostgreSQL](#-установка-postgresql)
-3. [Настройка сетевого доступа](#-настройка-сетевого-доступа)
-4. [Создание базы данных и пользователя](#-создание-базы-данных-и-пользователя)
-5. [Подготовка приложения](#-подготовка-приложения)
-6. [Миграция данных](#-миграция-данных)
-7. [Проверка работы](#-проверка-работы)
-8. [Решение проблем](#-решение-проблем)
+2. [Установка PostgreSQL](#1-установка-postgresql)
+3. [Настройка сетевого доступа](#2-настройка-сетевого-доступа)
+4. [Создание базы данных и пользователя](#3-создание-базы-данных-и-пользователя)
+5. [Подготовка приложения](#4-подготовка-приложения)
+6. [Миграция данных](#5-миграция-данных)
+7. [Проверка работы](#6-проверка-работы)
+8. [Решение проблем](#7-решение-проблем)
+9. [Дополнительные ресурсы](#-дополнительные-ресурсы)
+10. [Чек-лист успешной миграции](#-чек-лист-успешной-миграции)
 
 ---
 
 ## 🛠 Что понадобится
 
 | Компонент | Версия / Примечание |
-|-----------|---------------------|
+| --- | --- |
 | **PostgreSQL Server** | 14.x или новее (рекомендуется 16.x) |
 | **Python** | 3.10+ |
 | **psycopg2-binary** | Драйвер для подключения Python к PostgreSQL |
@@ -51,6 +53,7 @@ sudo systemctl start postgresql
 ```
 
 Проверка статуса:
+
 ```bash
 sudo systemctl status postgresql
 ```
@@ -64,10 +67,12 @@ sudo systemctl status postgresql
 ### Шаг 1: Изменение `postgresql.conf`
 
 Найдите файл конфигурации:
+
 - **Windows:** `C:\Program Files\PostgreSQL\16\data\postgresql.conf`
 - **Linux:** `/etc/postgresql/16/main/postgresql.conf`
 
 Найдите строку `listen_addresses` и измените её:
+
 ```ini
 listen_addresses = '*'
 ```
@@ -78,6 +83,7 @@ listen_addresses = '*'
 Файл находится в той же директории, что и `postgresql.conf`.
 
 Добавьте в конец файла правило для вашей подсети (замените `192.168.1.0/24` на вашу сеть):
+
 ```text
 # TYPE  DATABASE        USER            ADDRESS                 METHOD
 host    production_db   prod_user       192.168.1.0/24          scram-sha-256
@@ -88,11 +94,13 @@ host    production_db   prod_user       192.168.1.0/24          scram-sha-256
 ### Шаг 3: Перезапуск службы
 
 **Windows (PowerShell от администратора):**
+
 ```powershell
 Restart-Service -Name postgresql-x64-16
 ```
 
 **Linux:**
+
 ```bash
 sudo systemctl restart postgresql
 ```
@@ -102,11 +110,13 @@ sudo systemctl restart postgresql
 Откройте порт **5432** для входящих подключений:
 
 **Windows:**
+
 ```powershell
 New-NetFirewallRule -DisplayName "PostgreSQL" -Direction Inbound -LocalPort 5432 -Protocol TCP -Action Allow
 ```
 
 **Linux (UFW):**
+
 ```bash
 sudo ufw allow 5432/tcp
 ```
@@ -118,12 +128,14 @@ sudo ufw allow 5432/tcp
 Войдите в консоль PostgreSQL от имени суперпользователя.
 
 **Windows:**
+
 ```powershell
 cd "C:\Program Files\PostgreSQL\16\bin"
 .\psql.exe -U postgres
 ```
 
 **Linux:**
+
 ```bash
 sudo -u postgres psql
 ```
@@ -163,6 +175,7 @@ pip install psycopg2-binary
 ```
 
 Или обновите все зависимости из `requirements.txt`:
+
 ```bash
 pip install -r requirements.txt
 ```
@@ -200,7 +213,7 @@ SQLITE_PATH=production.db
 python migrate_sqlite_to_pg.py
 ```
 
-### Что делает скрипт:
+### Что делает скрипт
 
 1. ✅ Проверяет наличие файла SQLite (`production.db`).
 2. ✅ Подключается к PostgreSQL по параметрам из `.env`.
@@ -209,9 +222,9 @@ python migrate_sqlite_to_pg.py
 5. ✅ Переносит все записи, обрабатывая типы данных.
 6. ✅ Фиксирует транзакцию или выполняет откат при ошибке.
 
-### Пример вывода:
+### Пример вывода
 
-```
+```text
 🔍 Проверка исходной базы SQLite: production.db...
 ✅ Найдено таблиц: 8
 🔍 Подключение к PostgreSQL (192.168.1.100/production_db)...
@@ -243,6 +256,7 @@ python src/main.py
 ```
 
 Или запустите скомпилированную версию:
+
 ```bash
 ./dist/ProductionManager/ProductionManager.exe
 ```
@@ -262,13 +276,14 @@ python src/main.py
 
 ---
 
-## 7️⃣ Решение проблем
+## 8️⃣ Решение проблем
 
 ### ❌ Ошибка: "could not connect to server: Connection refused"
 
 **Причина:** PostgreSQL не слушает сетевые подключения или порт закрыт брандмауэром.
 
 **Решение:**
+
 1. Проверьте `listen_addresses = '*'` в `postgresql.conf`.
 2. Убедитесь, что служба PostgreSQL перезапущена.
 3. Проверьте правила брандмауэра (порт 5432 должен быть открыт).
@@ -279,10 +294,13 @@ python src/main.py
 **Причина:** В файле `pg_hba.conf` нет правила для вашего IP-адреса.
 
 **Решение:**
+
 Добавьте правило в `pg_hba.conf`:
+
 ```text
 host    production_db   prod_user   <ВАШ_IP>/32   scram-sha-256
 ```
+
 Перезапустите PostgreSQL.
 
 ### ❌ Ошибка: "password authentication failed"
@@ -290,8 +308,10 @@ host    production_db   prod_user   <ВАШ_IP>/32   scram-sha-256
 **Причина:** Неверный пароль или имя пользователя.
 
 **Решение:**
+
 1. Проверьте правильность `DB_USER` и `DB_PASSWORD` в `.env`.
 2. Убедитесь, что пользователь создан в PostgreSQL:
+
    ```sql
    \du
    ```
@@ -301,10 +321,13 @@ host    production_db   prod_user   <ВАШ_IP>/32   scram-sha-256
 **Причина:** База данных не создана или указано неверное имя.
 
 **Решение:**
+
 Проверьте список баз данных:
+
 ```sql
 \l
 ```
+
 Убедитесь, что `DB_NAME` в `.env` совпадает с именем базы.
 
 ### ❌ Ошибка при миграции: "relation already exists"
@@ -313,6 +336,7 @@ host    production_db   prod_user   <ВАШ_IP>/32   scram-sha-256
 
 **Решение:**
 Это нормальная ситуация. Скрипт пытается вставить данные в существующие таблицы. Если данные дублируются, очистите целевую базу перед повторной миграцией:
+
 ```sql
 -- Внимание: это удалит все данные!
 DROP SCHEMA public CASCADE;
