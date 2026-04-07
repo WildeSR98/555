@@ -2,6 +2,7 @@
 Вкладка Проекты — дерево проектов с устройствами и операциями.
 """
 
+from typing import Optional
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTreeWidget,
     QTreeWidgetItem, QPushButton, QLineEdit, QComboBox, QHeaderView,
@@ -90,6 +91,23 @@ class ProjectsTab(QWidget):
         self.details_title.setMinimumWidth(150)
         details_layout.addWidget(self.details_title)
 
+        # Панель статистики проекта (в деталях)
+        self.project_stats_widget = QWidget()
+        self.project_stats_widget.setVisible(False)
+        self.stats_panel = QHBoxLayout(self.project_stats_widget)
+        self.stats_panel.setContentsMargins(0, 5, 0, 10)
+        self.stats_panel.setSpacing(10)
+        
+        self.stat_not_started = self._create_stat_card('⚪ Ожид.', '#94a3b8')
+        self.stat_in_work = self._create_stat_card('🟡 Работ.', '#3b82f6')
+        self.stat_done = self._create_stat_card('🟢 Готов.', '#22c55e')
+        
+        self.stats_panel.addWidget(self.stat_not_started)
+        self.stats_panel.addWidget(self.stat_in_work)
+        self.stats_panel.addWidget(self.stat_done)
+        
+        details_layout.addWidget(self.project_stats_widget)
+
         self.details_table = QTableWidget()
         self.details_table.setColumnCount(2)
         self.details_table.setHorizontalHeaderLabels(['Поле', 'Значение'])
@@ -117,6 +135,36 @@ class ProjectsTab(QWidget):
         details_widget.setMaximumWidth(450)
 
         layout.addWidget(splitter)
+
+    def _create_stat_card(self, title: str, color: str) -> QFrame:
+        """Создание карточки статистики."""
+        card = QFrame()
+        card.setFixedHeight(50)
+        card.setMinimumWidth(80)
+        card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['bg_surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 8px;
+            }}
+        """)
+        
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(2)
+        
+        title_lbl = QLabel(title)
+        title_lbl.setStyleSheet(f"color: {color}; font-weight: 600; font-size: 11px; text-transform: uppercase;")
+        layout.addWidget(title_lbl)
+        
+        # Сохраняем ссылку на ярлык со значением
+        value_lbl = QLabel('0')
+        value_lbl.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {COLORS['text_primary']};")
+        layout.addWidget(value_lbl)
+        
+        # Добавляем атрибут к фрейму для легкого доступа
+        card.value_label = value_lbl
+        return card
 
     def _create_project(self) -> None:
         """Открытие диалога создания нового проекта."""
@@ -338,8 +386,51 @@ class ProjectsTab(QWidget):
                 else:
                     QMessageBox.critical(self, 'Ошибка', f'Ошибка при создании проекта:\n{e}')
 
+    def _update_statistics(self, project_id: Optional[int] = None) -> None:
+        """Расчет статистики по конкретному проекту."""
+        if not project_id:
+            self.project_stats_widget.setVisible(False)
+            return
+
+        try:
+            session = get_session()
+            from sqlalchemy import func
+            
+            # Группировка статусов
+            not_started_group = [
+                'WAITING_KITTING', 'PRE_PRODUCTION', 'WAITING_ASSEMBLY', 
+                'WAITING_PARTS', 'WAITING_SOFTWARE'
+            ]
+            done_group = ['WAREHOUSE', 'QC_PASSED', 'SHIPPED']
+            
+            # Статистика только по ОДНОМУ проекту
+            stats = session.query(
+                Device.status, func.count(Device.id)
+            ).filter(Device.project_id == project_id).group_by(Device.status).all()
+            
+            counts = {'not_started': 0, 'in_work': 0, 'done': 0}
+            
+            for status, count in stats:
+                if status in not_started_group:
+                    counts['not_started'] += count
+                elif status in done_group:
+                    counts['done'] += count
+                else:
+                    counts['in_work'] += count
+            
+            # Обновление UI
+            self.stat_not_started.value_label.setText(str(counts['not_started']))
+            self.stat_in_work.value_label.setText(str(counts['in_work']))
+            self.stat_done.value_label.setText(str(counts['done']))
+            
+            self.project_stats_widget.setVisible(True)
+            session.close()
+        except Exception as e:
+            print(f"Stats error: {e}")
+
     def refresh_data(self) -> None:
         """Загрузка данных в дерево."""
+        self.project_stats_widget.setVisible(False)
         self.tree.clear()
         try:
             session = get_session()
@@ -449,8 +540,13 @@ class ProjectsTab(QWidget):
 
         entity_type, entity_id = data
         self.btn_delete_project.setVisible(entity_type == 'project')
+        
+        # Обновляем статистику, если выбран проект
         if entity_type == 'project':
             self.current_project_id = entity_id
+            self._update_statistics(entity_id)
+        else:
+            self.project_stats_widget.setVisible(False)
 
         try:
             session = get_session()

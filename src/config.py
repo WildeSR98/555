@@ -32,6 +32,7 @@ class DatabaseConfig:
     db_name: str = 'production_db'
     db_user: str = 'prod_user'
     db_password: str = 'strong_password_here'
+    db_sslmode: str = 'disable'
     pool_min: int = 1
     pool_max: int = 40
     connect_timeout: int = 30
@@ -46,7 +47,7 @@ class DatabaseConfig:
             return (
                 f"postgresql+psycopg2://{self.db_user}:{self.db_password}"
                 f"@{self.db_host}:{self.db_port}/{self.db_name}"
-                f"?sslmode=require&connect_timeout={self.connect_timeout}"
+                f"?sslmode={self.db_sslmode}&connect_timeout={self.connect_timeout}"
             )
         else:
             raise ValueError(f"Неподдерживаемый тип БД: {self.db_type}")
@@ -71,6 +72,7 @@ class AppConfig:
             db_name=os.getenv('DB_NAME', 'production_db'),
             db_user=os.getenv('DB_USER', ''),
             db_password=os.getenv('DB_PASSWORD', ''),
+            db_sslmode=os.getenv('DB_SSLMODE', 'disable'),
         )
         return cls(
             debug=os.getenv('DEBUG', 'False').lower() in ('true', '1', 'yes'),
