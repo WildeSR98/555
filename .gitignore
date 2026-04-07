@@ -23,7 +23,7 @@ Thumbs.db
 .DS_Store
 
 # DB (не заливать базу с реальными данными)
-*.sqlite3
+# *.sqlite3
 
 # Chat logs
 *.txt
