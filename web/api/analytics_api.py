@@ -2,7 +2,7 @@
 API эндпоинты для Analytics.
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import datetime, timedelta
@@ -21,12 +21,18 @@ async def get_analytics_summary(db: Session = Depends(get_db)):
         Device.status, func.count(Device.id)
     ).group_by(Device.status).all()
     
+    # Стилизуем ключи
+    status_map = {}
+    for st, count in device_status:
+        display = Device.STATUS_DISPLAY.get(st, st)
+        status_map[display] = count
+    
     # Работы за последние 30 дней
     month_ago = datetime.now() - timedelta(days=30)
     monthly_work = db.query(
         func.date(WorkLog.created_at).label('date'),
         func.count(WorkLog.id).label('count')
-    ).filter(WorkLog.created_at >= month_ago).group_by(func.date(WorkLog.created_at)).all()
+    ).filter(WorkLog.created_at >= month_ago, WorkLog.action == 'COMPLETED').group_by(func.date(WorkLog.created_at)).all()
     
     # Топ пользователей
     top_users = db.query(
@@ -37,7 +43,7 @@ async def get_analytics_summary(db: Session = Depends(get_db)):
     ).limit(10).all()
     
     return {
-        "device_status": {status: count for status, count in device_status},
+        "device_status": status_map,
         "monthly_work": [
             {"date": str(row[0]), "count": row[1]} 
             for row in monthly_work
@@ -54,44 +60,63 @@ async def get_analytics_summary(db: Session = Depends(get_db)):
     }
 
 
-@router.get("/devices")
-async def get_device_analytics(db: Session = Depends(get_db)):
-    """Аналитика по устройствам."""
-    devices = db.query(
-        Device.id, Device.serial_number, Device.device_type, Device.status,
-        func.count(WorkLog.id).label('work_count')
-    ).outerjoin(WorkLog, WorkLog.device_id == Device.id).group_by(Device.id).all()
+@router.get("/employee")
+async def get_employee_analytics(
+    user_id: int = Query(...),
+    period: str = Query("all"),
+    db: Session = Depends(get_db)
+):
+    """Аналитика по конкретному сотруднику с фильтром по времени."""
+    now = datetime.now()
+    cutoff = None
     
-    return [
-        {
-            "id": row[0],
-            "sn": row[1],
-            "model": row[2],
-            "status": row[3],
-            "work_count": row[4],
-        }
-        for row in devices
-    ]
-
-
-@router.get("/users")
-async def get_user_analytics(db: Session = Depends(get_db)):
-    """Аналитика по пользователям."""
-    users = db.query(User).all()
-    result = []
-    
-    for user in users:
-        work_count = db.query(func.count(WorkLog.id)).filter(WorkLog.worker_id == user.id).scalar()
-        last_work = db.query(WorkLog).filter(WorkLog.worker_id == user.id).order_by(WorkLog.created_at.desc()).first()
+    if period == "today":
+        cutoff = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    elif period == "week":
+        cutoff = now - timedelta(days=7)
+    elif period == "month":
+        cutoff = now - timedelta(days=30)
         
-        result.append({
-            "id": user.id,
-            "username": user.username,
-            "full_name": user.full_name,
-            "role": user.role,
-            "role_display": user.role_display,
-            "work_count": work_count,
-            "last_work_at": last_work.created_at.isoformat() if last_work and last_work.created_at else None,
-        })
+    query = db.query(WorkLog).filter(WorkLog.worker_id == user_id)
+    if cutoff:
+        query = query.filter(WorkLog.created_at >= cutoff)
+        
+    logs = query.order_by(WorkLog.created_at.desc()).all()
     
-    return result
+    # Подсчет статистики
+    stats = {
+        "completed": 0,
+        "defect": 0,
+        "scan_in": 0
+    }
+    
+    ACTION_MAP = {
+        'SCAN_IN': 'Взято в работу',
+        'COMPLETED': 'Завершено',
+        'DEFECT': 'Брак',
+        'KEPT': 'Оставлено',
+        'MAKE_SEMIFINISHED': 'Отправлено в ПФ'
+    }
+    
+    history = []
+    for log in logs:
+        if log.action == 'COMPLETED':
+            stats["completed"] += 1
+        elif log.action == 'DEFECT':
+            stats["defect"] += 1
+        elif log.action == 'SCAN_IN':
+            stats["scan_in"] += 1
+            
+        history.append({
+            "id": log.id,
+            "created_at": log.created_at.strftime('%d.%m.%Y %H:%M:%S') if log.created_at else "—",
+            "action": ACTION_MAP.get(log.action, log.action),
+            "sn": log.device.serial_number if log.device and log.device.serial_number else (log.device.part_number if log.device else "—"),
+            "project": log.project.name if log.project else "—",
+            "workplace": log.workplace.name if log.workplace else "—"
+        })
+        
+    return {
+        "stats": stats,
+        "history": history
+    }

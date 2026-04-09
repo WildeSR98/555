@@ -55,58 +55,58 @@
 
 {% block extra_js %}
 <script>
-const deviceStatusData = {{ device_status | tojson }};
-const weeklyWorkData = {{ weekly_work | tojson }};
+    const deviceStatusData = {{ device_status | tojson }};
+    const weeklyWorkData = {{ weekly_work | tojson }};
 
-// График статусов устройств
-const statusLabels = Object.keys(deviceStatusData);
-const statusValues = Object.values(deviceStatusData);
+    // График статусов устройств
+    const statusLabels = Object.keys(deviceStatusData);
+    const statusValues = Object.values(deviceStatusData);
 
-const ctx1 = document.getElementById('deviceStatusChart').getContext('2d');
-new Chart(ctx1, {
-    type: 'pie',
-    data: {
-        labels: statusLabels,
-        datasets: [{
-            data: statusValues,
-            backgroundColor: [
-                '#10b981', '#f59e0b', '#ef4444', '#6366f1', 
-                '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'
-            ]
-        }]
-    },
-    options: {
-        responsive: true,
-        plugins: {
-            legend: { position: 'bottom' }
-        }
-    }
-});
-
-// График активности за 30 дней
-if (weeklyWorkData.length > 0) {
-    const ctx2 = document.getElementById('monthlyActivityChart').getContext('2d');
-    new Chart(ctx2, {
-        type: 'bar',
+    const ctx1 = document.getElementById('deviceStatusChart').getContext('2d');
+    new Chart(ctx1, {
+        type: 'pie',
         data: {
-            labels: weeklyWorkData.map(d => d.date),
+            labels: statusLabels,
             datasets: [{
-                label: 'Работ в день',
-                data: weeklyWorkData.map(d => d.count),
-                backgroundColor: '#4f46e5',
-                borderRadius: 4,
+                data: statusValues,
+                backgroundColor: [
+                    '#10b981', '#f59e0b', '#ef4444', '#6366f1',
+                    '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'
+                ]
             }]
         },
         options: {
             responsive: true,
             plugins: {
-                legend: { display: false }
-            },
-            scales: {
-                y: { beginAtZero: true }
+                legend: { position: 'bottom' }
             }
         }
     });
-}
+
+    // График активности за 30 дней
+    if (weeklyWorkData.length > 0) {
+        const ctx2 = document.getElementById('monthlyActivityChart').getContext('2d');
+        new Chart(ctx2, {
+            type: 'bar',
+            data: {
+                labels: weeklyWorkData.map(d => d.date),
+                datasets: [{
+                    label: 'Работ в день',
+                    data: weeklyWorkData.map(d => d.count),
+                    backgroundColor: '#4f46e5',
+                    borderRadius: 4,
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    y: { beginAtZero: true }
+                }
+            }
+        });
+    }
 </script>
 {% endblock %}
