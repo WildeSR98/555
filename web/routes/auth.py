@@ -53,7 +53,7 @@ async def login_submit(
     import hashlib
     
     user = db.query(User).filter(
-        (User.username == username) | (User.pin_code == username)
+        (User.username == username) | (User.action_pin == username)
     ).first()
     
     if user and user.check_password(password):
