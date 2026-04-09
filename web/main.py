@@ -92,3 +92,7 @@ async def index(request: Request):
     """Перенаправление на дашборд."""
     from fastapi.responses import RedirectResponse
     return RedirectResponse(url="/login")
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("web.main:app", host="127.0.0.1", port=8000, reload=True)
