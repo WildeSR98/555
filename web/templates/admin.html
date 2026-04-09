@@ -44,8 +44,16 @@
                 <td>{{ u.date_joined.strftime('%d.%m.%Y %H:%M') if u.date_joined else '—' }}</td>
                 <td>
                     <div style="display:flex; gap:6px;">
-                        <button class="btn-sm btn-edit" onclick="openEditModal({{ u.id }}, '{{ u.username }}', '{{ u.first_name or '' }}', '{{ u.last_name or '' }}', '{{ u.role }}')">Изменить</button>
-                        <button class="btn-sm {% if u.is_active %}btn-danger{% else %}btn-success-sm{% endif %}" onclick="toggleActive({{ u.id }})">
+                        <button class="btn-sm btn-edit" 
+                                data-id="{{ u.id }}" 
+                                data-username="{{ u.username }}"
+                                data-firstname="{{ u.first_name or '' }}"
+                                data-lastname="{{ u.last_name or '' }}"
+                                data-role="{{ u.role }}"
+                                onclick="handleEditClick(this)">Изменить</button>
+                        <button class="btn-sm {% if u.is_active %}btn-danger{% else %}btn-success-sm{% endif %}" 
+                                data-id="{{ u.id }}"
+                                onclick="handleToggleClick(this)">
                             {{ 'Заблокировать' if u.is_active else 'Разблокировать' }}
                         </button>
                     </div>
@@ -150,6 +158,20 @@ function openEditModal(id, username, firstName, lastName, role) {
     document.getElementById('editRole').value = role;
     document.getElementById('editPassword').value = '';
     document.getElementById('editModal').style.display = 'flex';
+}
+
+function handleEditClick(btn) {
+    openEditModal(
+        btn.dataset.id,
+        btn.dataset.username,
+        btn.dataset.firstname,
+        btn.dataset.lastname,
+        btn.dataset.role
+    );
+}
+
+function handleToggleClick(btn) {
+    toggleActive(btn.dataset.id);
 }
 
 function closeModal(id) {
