@@ -3,26 +3,120 @@
 {% block title %}Конвейер — Production Manager{% endblock %}
 
 {% block content %}
-<div class="page-header">
-    <h2>🔄 Конвейер производства</h2>
-    <p class="text-muted">Устройства в процессе производства</p>
+<div class="page-header" style="display: flex; align-items: center; justify-content: space-between;">
+    <div>
+        <h2>🔧 Производственный конвейер</h2>
+        <p class="text-muted">Всего на конвейере: <strong>{{ total }}</strong> устройств</p>
+    </div>
+    <button class="btn btn-primary" onclick="location.reload()">⟳ Обновить</button>
 </div>
 
-<div class="pipeline-grid">
-    {% for device in devices %}
-    <div class="pipeline-card status-{{ device.status|lower }}">
-        <div class="pipeline-header">
-            <h3>{{ device.serial_number }}</h3>
-            <span class="badge status-{{ device.status|lower }}">{{ device.status }}</span>
+<!-- Основной конвейер: карточки этапов -->
+<div class="conveyor-label" style="font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px;">Конвейер ➜</div>
+
+<div class="pipeline-stages">
+    {% for stage in stages %}
+    <div class="pipeline-stage-col">
+        <!-- Карточка ожидания -->
+        <div class="pipeline-mini-card pipeline-waiting" data-status="{{ stage.waiting_code }}" onclick="loadDevices('{{ stage.waiting_code }}', 'Ожид. {{ stage.label }}')">
+            <div class="pipeline-mini-label">Ожид.</div>
+            <div class="pipeline-mini-count">{{ stage.waiting_count }}</div>
         </div>
-        <div class="pipeline-info">
-            <p><strong>Модель:</strong> {{ device.name or '—' }}</p>
+        <!-- Карточка в работе -->
+        <div class="pipeline-mini-card pipeline-working" data-status="{{ stage.working_code }}" onclick="loadDevices('{{ stage.working_code }}', '{{ stage.label }}')">
+            <div class="pipeline-mini-label">{{ stage.label }}</div>
+            <div class="pipeline-mini-count">{{ stage.working_count }}</div>
         </div>
-    </div>
-    {% else %}
-    <div class="empty-state">
-        <p>Нет устройств в производстве</p>
     </div>
     {% endfor %}
 </div>
+
+<!-- Дополнительные статусы -->
+<div class="conveyor-label" style="font-size: 11px; font-weight: 700; color: var(--text-muted); margin: 16px 0 8px; text-transform: uppercase; letter-spacing: 1px;">Статусы ↓</div>
+
+<div class="pipeline-extras">
+    {% for extra in extras %}
+    <div class="pipeline-mini-card pipeline-extra {% if extra.code == 'DEFECT' %}pipeline-defect{% elif extra.code == 'SHIPPED' or extra.code == 'QC_PASSED' %}pipeline-done{% endif %}"
+         data-status="{{ extra.code }}" onclick="loadDevices('{{ extra.code }}', '{{ extra.label }}')">
+        <div class="pipeline-mini-label">{{ extra.label }}</div>
+        <div class="pipeline-mini-count">{{ extra.count }}</div>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- Таблица устройств выбранного этапа -->
+<div class="card" style="margin-top: 20px;">
+    <h3 id="stageTitle">📋 Выберите этап для просмотра устройств</h3>
+    <table class="table" id="devicesTable" style="display: none;">
+        <thead>
+            <tr>
+                <th>Название</th>
+                <th>SN</th>
+                <th>PN</th>
+                <th>Проект</th>
+                <th>Работник</th>
+            </tr>
+        </thead>
+        <tbody id="devicesBody">
+        </tbody>
+    </table>
+    <p id="devicesEmpty" class="text-muted text-center" style="display: none; padding: 20px;">Нет устройств на этом этапе</p>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let activeCard = null;
+
+async function loadDevices(status, label) {
+    // Подсветка активной карточки
+    if (activeCard) activeCard.classList.remove('pipeline-active');
+    const cards = document.querySelectorAll(`[data-status="${status}"]`);
+    if (cards.length > 0) {
+        activeCard = cards[0];
+        activeCard.classList.add('pipeline-active');
+    }
+
+    document.getElementById('stageTitle').textContent = `📋 Устройства — ${label}`;
+
+    try {
+        const resp = await fetch(`/api/pipeline/devices?status=${status}`);
+        const devices = await resp.json();
+        const tbody = document.getElementById('devicesBody');
+        const table = document.getElementById('devicesTable');
+        const empty = document.getElementById('devicesEmpty');
+
+        if (devices.length === 0) {
+            table.style.display = 'none';
+            empty.style.display = 'block';
+            return;
+        }
+
+        tbody.innerHTML = devices.map(d => `
+            <tr>
+                <td>${d.name}</td>
+                <td><code>${d.sn || '—'}</code></td>
+                <td>${d.pn || '—'}</td>
+                <td>${d.project}</td>
+                <td>${d.worker}</td>
+            </tr>
+        `).join('');
+
+        table.style.display = 'table';
+        empty.style.display = 'none';
+    } catch (e) {
+        console.error('Pipeline load error:', e);
+    }
+}
+
+// Авто-обновление каждые 30 секунд
+setInterval(() => {
+    if (activeCard) {
+        const status = activeCard.dataset.status;
+        const label = activeCard.querySelector('.pipeline-mini-label').textContent;
+        loadDevices(status, label);
+    }
+}, 30000);
+</script>
 {% endblock %}

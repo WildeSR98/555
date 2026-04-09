@@ -3,57 +3,320 @@
 {% block title %}Скан — Production Manager{% endblock %}
 
 {% block content %}
-<div class="page-header">
-    <h2>📷 Сканирование</h2>
-    <p class="text-muted">Сканирование QR-кодов и штрихкодов</p>
-</div>
-
-<div class="scan-container">
-    <div class="card">
-        <h3>Ввод серийного номера</h3>
-        <form id="scanForm" class="scan-form">
-            <div class="form-group">
-                <input type="text" id="snInput" placeholder="Отсканируйте или введите SN..." 
-                       autofocus class="input-large">
-            </div>
-            <button type="submit" class="btn btn-primary">Сканировать</button>
-        </form>
-        <div id="scanResult" class="scan-result"></div>
+<div class="page-header" style="display:flex; justify-content:space-between; align-items:center;">
+    <div>
+        <h2>📷 Сканирование (Производство)</h2>
+        <p class="text-muted" id="sessionStatus">Ожидание выбора рабочего места...</p>
+    </div>
+    <div id="sessionControls" style="display:none;">
+        <button class="btn btn-danger" onclick="endSession()">Завершить смену</button>
     </div>
 </div>
 
+<div class="scan-container" style="max-width: 800px; margin: 0 auto;">
+
+    <!-- ШАГ 1: Вход в систему -->
+    <div id="stepLogin" class="card">
+        <h3>Шаг 1: Авторизация на рабочем месте</h3>
+        <form id="loginForm" onsubmit="startSession(event)">
+            <div class="form-group">
+                <label>📍 Выберите рабочее место:</label>
+                <select id="workplaceSelect" required class="input-large">
+                    <option value="" disabled selected>Загрузка...</option>
+                </select>
+            </div>
+            
+            <div class="form-group mt-4">
+                <label>👤 Пин-код / Бейдж работника:</label>
+                <input type="password" id="workerCode" required placeholder="Просканируйте бейдж или введите пин..." class="input-large" autofocus>
+            </div>
+            
+            <button type="submit" class="btn btn-primary btn-block mt-4" style="font-size: 1.2rem; padding: 1rem;">Начать работу</button>
+        </form>
+    </div>
+
+    <!-- ШАГ 2 & 3: Сканирование и действия (показывается после входа) -->
+    <div id="stepWork" style="display:none;">
+        
+        <!-- Инфо-панель -->
+        <div class="alert alert-info" style="display:flex; justify-content:space-between; align-items:center;">
+            <div>
+                <strong>Работник:</strong> <span id="lblWorker"></span> <br>
+                <strong>Место:</strong> <span id="lblWorkplace"></span>
+            </div>
+            <div style="font-size: 1.5rem; border-left:2px solid rgba(0,0,0,0.1); padding-left:15px;">
+                Буфер: <strong id="lblBuffer">0</strong> / <span id="lblLimit">X</span>
+            </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns: 1fr 250px; gap: 20px;">
+            
+            <!-- Левая колонка: Ввод SN -->
+            <div class="card">
+                <h3>Шаг 2: Сканирование устройств</h3>
+                <form id="scanForm" onsubmit="processScan(event)">
+                    <div class="form-group">
+                        <input type="text" id="snInput" placeholder="Отсканируйте SN..." class="input-large" autocomplete="off">
+                    </div>
+                </form>
+
+                <div id="scanFeedback" style="margin-bottom: 15px;"></div>
+
+                <div style="max-height: 300px; overflow-y: auto;">
+                    <table class="table" id="devicesTable">
+                        <thead>
+                            <tr>
+                                <th><input type="checkbox" id="selectAll" checked onclick="toggleAll()"></th>
+                                <th>SN</th>
+                                <th>Статус</th>
+                            </tr>
+                        </thead>
+                        <tbody id="devicesBody">
+                            <tr id="emptyRow"><td colspan="3" class="text-center text-muted">Нет устройств в буфере</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Правая колонка: Действия -->
+            <div class="card">
+                <h3>Шаг 3: Действие</h3>
+                <p class="text-muted" style="margin-bottom:15px; font-size:12px;">Выбрано для обработки: <strong id="selectedCount">0</strong></p>
+                
+                <div style="display:flex; flex-direction:column; gap:10px;">
+                    <button class="btn btn-success" style="font-weight:bold; padding:15px;" onclick="doAction('complete')">✅ Готово</button>
+                    <button class="btn btn-danger" style="font-weight:bold; padding:15px;" onclick="doAction('defect')">⚠️ Брак</button>
+                    <hr style="border:none; border-top:1px solid var(--border); margin:5px 0;">
+                    <button class="btn btn-secondary" onclick="doAction('keep')">📌 Оставить</button>
+                    <button class="btn btn-secondary" onclick="doAction('semifinished')">🔧 Отпр. в Полуфабрикат</button>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<style>
+    .btn-secondary { background: var(--bg); color: var(--text); border: 1px solid var(--border); }
+    .btn-secondary:hover { background: #e2e8f0; }
+    .btn-success { background: var(--success); color: white; border: none; }
+    .btn-success:hover { background: #059669; }
+    .btn-danger { background: var(--error); color: white; border: none; }
+    .btn-danger:hover { background: #dc2626; }
+    .mt-4 { margin-top: 1.5rem; }
+    .sn-item { font-family: monospace; font-size: 14px; }
+</style>
+{% endblock %}
+
+{% block extra_js %}
 <script>
-document.getElementById('scanForm').addEventListener('submit', async (e) => {
+let state = {
+    sessionId: null,
+    workerId: null,
+    workplaceId: null,
+    batchLimit: 1,
+    devices: [], // {id, sn, name, status}
+};
+
+document.addEventListener('DOMContentLoaded', loadWorkplaces);
+
+async function loadWorkplaces() {
+    try {
+        const resp = await fetch('/api/scan/workplaces');
+        const workplaces = await resp.json();
+        const sel = document.getElementById('workplaceSelect');
+        sel.innerHTML = '<option value="" disabled selected>-- Выберите рабочее место --</option>';
+        workplaces.forEach(wp => {
+            const opt = document.createElement('option');
+            opt.value = wp.id;
+            opt.textContent = `${wp.name} [${wp.type}]`;
+            sel.appendChild(opt);
+        });
+    } catch (e) {
+        alert('Ошибка загрузки рабочих мест: ' + e.message);
+    }
+}
+
+async function startSession(e) {
     e.preventDefault();
+    const wpId = document.getElementById('workplaceSelect').value;
+    const code = document.getElementById('workerCode').value;
+    
+    try {
+        const resp = await fetch('/api/scan/start-session', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ workplace_id: parseInt(wpId), worker_code: code })
+        });
+        const res = await resp.json();
+        if (resp.ok) {
+            state.sessionId = res.session_id;
+            state.workerId = res.worker_id;
+            state.workplaceId = parseInt(wpId);
+            state.batchLimit = res.batch_limit;
+            
+            document.getElementById('lblWorker').textContent = res.worker_name;
+            document.getElementById('lblWorkplace').textContent = res.workplace_name;
+            document.getElementById('lblLimit').textContent = res.batch_limit;
+            document.getElementById('sessionStatus').innerHTML = `🟢 Открыта смена. <strong>${res.worker_name}</strong>`;
+            
+            document.getElementById('stepLogin').style.display = 'none';
+            document.getElementById('stepWork').style.display = 'block';
+            document.getElementById('sessionControls').style.display = 'block';
+            
+            document.getElementById('snInput').focus();
+        } else {
+            alert(res.detail || 'Ошибка входа');
+            document.getElementById('workerCode').value = '';
+            document.getElementById('workerCode').focus();
+        }
+    } catch (e) {
+        alert('Ошибка сети: ' + e.message);
+    }
+}
+
+async function endSession() {
+    if (!state.sessionId) return;
+    if (!confirm('Завершить рабочую смену?')) return;
+    
+    try {
+        await fetch('/api/scan/end-session', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ session_id: state.sessionId })
+        });
+        location.reload();
+    } catch (e) {
+        alert('Ошибка сети: ' + e.message);
+    }
+}
+
+async function processScan(e) {
+    e.preventDefault();
+    if (state.devices.length >= state.batchLimit) {
+        showFeedback('error', `Достигнут лимит буфера (${state.batchLimit}). Обработайте устройства.`);
+        document.getElementById('snInput').value = '';
+        return;
+    }
+
     const sn = document.getElementById('snInput').value.trim();
     if (!sn) return;
     
-    const resultDiv = document.getElementById('scanResult');
-    resultDiv.innerHTML = '<p class="text-muted">Обработка...</p>';
-    
+    // Проверка, что еще не отсканирован
+    if (state.devices.find(d => d.sn === sn)) {
+        showFeedback('warning', `SN ${sn} уже добавлен.`);
+        document.getElementById('snInput').value = '';
+        return;
+    }
+
     try {
-        const response = await fetch(`/api/devices?search=${encodeURIComponent(sn)}`);
-        const devices = await response.json();
+        const resp = await fetch('/api/scan/process-batch', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                session_id: state.sessionId,
+                workplace_id: state.workplaceId,
+                worker_id: state.workerId,
+                serial_numbers: [sn]
+            })
+        });
+        const res = await resp.json();
         
-        if (devices.length > 0) {
-            const device = devices[0];
-            resultDiv.innerHTML = `
-                <div class="alert alert-success">
-                    <h4>Устройство найдено</h4>
-                    <p><strong>SN:</strong> ${device.sn}</p>
-                    <p><strong>Модель:</strong> ${device.model || '—'}</p>
-                    <p><strong>Статус:</strong> ${device.status}</p>
-                </div>
-            `;
+        if (resp.ok) {
+            const dev = res.devices[0];
+            state.devices.push(dev);
+            
+            let msg = `Добавлено: ${dev.sn}`;
+            if (res.scan_in_count > 0) msg += ' (Устройство взято в работу)';
+            showFeedback('success', msg);
+            renderDevices();
         } else {
-            resultDiv.innerHTML = '<div class="alert alert-error">Устройство не найдено</div>';
+            showFeedback('error', res.detail || 'Ошибка');
         }
-    } catch (error) {
-        resultDiv.innerHTML = `<div class="alert alert-error">Ошибка: ${error.message}</div>`;
+    } catch (e) {
+        showFeedback('error', 'Ошибка сети: ' + e.message);
     }
     
     document.getElementById('snInput').value = '';
     document.getElementById('snInput').focus();
-});
+}
+
+function showFeedback(type, text) {
+    const fb = document.getElementById('scanFeedback');
+    let color = 'var(--text)';
+    let bg = 'transparent';
+    if(type === 'error') { color = '#991b1b'; bg = '#fee2e2'; }
+    if(type === 'success') { color = '#065f46'; bg = '#d1fae5'; }
+    if(type === 'warning') { color = '#92400e'; bg = '#fef3c7'; }
+    
+    fb.innerHTML = `<div style="padding:10px; border-radius:4px; font-size:14px; font-weight:500; background:${bg}; color:${color};">${text}</div>`;
+    setTimeout(() => { fb.innerHTML = ''; }, 4000);
+}
+
+function renderDevices() {
+    const tbody = document.getElementById('devicesBody');
+    document.getElementById('lblBuffer').textContent = state.devices.length;
+    
+    if (state.devices.length === 0) {
+        tbody.innerHTML = '<tr id="emptyRow"><td colspan="3" class="text-center text-muted">Нет устройств в буфере</td></tr>';
+        updateSelectedCount();
+        return;
+    }
+    
+    tbody.innerHTML = state.devices.map(d => `
+        <tr>
+            <td><input type="checkbox" class="device-check" value="${d.id}" checked onchange="updateSelectedCount()"></td>
+            <td class="sn-item">${d.sn}</td>
+            <td><span class="badge">${d.status}</span></td>
+        </tr>
+    `).join('');
+    updateSelectedCount();
+}
+
+function toggleAll() {
+    const chk = document.getElementById('selectAll').checked;
+    document.querySelectorAll('.device-check').forEach(cb => { cb.checked = chk; });
+    updateSelectedCount();
+}
+
+function updateSelectedCount() {
+    const cnt = document.querySelectorAll('.device-check:checked').length;
+    document.getElementById('selectedCount').textContent = cnt;
+}
+
+async function doAction(actionName) {
+    const selectedIds = Array.from(document.querySelectorAll('.device-check:checked')).map(cb => parseInt(cb.value));
+    if (selectedIds.length === 0) {
+        alert('Выберите хотя бы одно устройство!');
+        return;
+    }
+    
+    try {
+        const resp = await fetch('/api/scan/action', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                session_id: state.sessionId,
+                workplace_id: state.workplaceId,
+                worker_id: state.workerId,
+                device_ids: selectedIds,
+                action: actionName
+            })
+        });
+        const res = await resp.json();
+        
+        if (resp.ok) {
+            // Удаляем обработанные из стейта
+            state.devices = state.devices.filter(d => !selectedIds.includes(d.id));
+            renderDevices();
+            showFeedback('success', res.message);
+            document.getElementById('snInput').focus();
+        } else {
+            showFeedback('error', res.detail || 'Ошибка при сохранении');
+        }
+    } catch (e) {
+        alert('Ошибка сети: ' + e.message);
+    }
+}
 </script>
 {% endblock %}
