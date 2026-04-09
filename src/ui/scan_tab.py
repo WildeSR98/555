@@ -201,13 +201,7 @@ class ScanTab(QWidget):
         self.btn_complete.clicked.connect(lambda: self._do_action('complete'))
         actions_layout.addWidget(self.btn_complete)
 
-        self.btn_in_progress = QPushButton('▶ В работе')
-        self.btn_in_progress.setProperty('class', 'primary')
-        self.btn_in_progress.setMinimumHeight(50)
-        self.btn_in_progress.setFont(QFont('Segoe UI', 13, QFont.Weight.Bold))
-        self.btn_in_progress.setStyleSheet('background-color: #3b82f6; color: white;')
-        self.btn_in_progress.clicked.connect(lambda: self._do_action('in_progress'))
-        actions_layout.addWidget(self.btn_in_progress)
+        # Кнопка "В работе" удалена по требованию (процесс теперь автоматический через скан)
 
         self.btn_defect = QPushButton('⚠ Брак')
         self.btn_defect.setProperty('class', 'danger')
@@ -478,19 +472,16 @@ class ScanTab(QWidget):
 
     def _do_action(self, action: str) -> None:
         STATUS_MAP = {
-            'WAITING_KITTING': 'PRE_PRODUCTION',
+            'WAITING_KITTING': 'WAITING_PRE_PRODUCTION',
             'PRE_PRODUCTION': 'WAITING_ASSEMBLY',
-            'WAITING_ASSEMBLY': 'ASSEMBLY',
             'ASSEMBLY': 'WAITING_VIBROSTAND',
-            'WAITING_VIBROSTAND': 'VIBROSTAND',
-            'VIBROSTAND': 'TECH_CONTROL_1_1',
-            'TECH_CONTROL_1_1': 'TECH_CONTROL_1_2',
-            'TECH_CONTROL_1_2': 'FUNC_CONTROL',
-            'FUNC_CONTROL': 'TECH_CONTROL_2_1',
-            'TECH_CONTROL_2_1': 'TECH_CONTROL_2_2',
+            'VIBROSTAND': 'WAITING_TECH_CONTROL_1_1', # По умолчанию на 1.1
+            'TECH_CONTROL_1_1': 'WAITING_FUNC_CONTROL',
+            'TECH_CONTROL_1_2': 'WAITING_FUNC_CONTROL',
+            'FUNC_CONTROL': 'WAITING_TECH_CONTROL_2_1',
+            'TECH_CONTROL_2_1': 'WAITING_PACKING',
             'TECH_CONTROL_2_2': 'WAITING_PACKING',
-            'WAITING_PACKING': 'PACKING',
-            'PACKING': 'ACCOUNTING',
+            'PACKING': 'WAITING_ACCOUNTING',
             'ACCOUNTING': 'WAREHOUSE',
             'WAREHOUSE': 'QC_PASSED',
         }
@@ -514,8 +505,6 @@ class ScanTab(QWidget):
                     target_status = STATUS_MAP.get(old_status, 'QC_PASSED')
                 elif action == 'defect':
                     target_status = 'DEFECT'
-                elif action == 'in_progress':
-                    target_status = workplace.workplace_type
 
                 can_proceed, err_msg = WorkflowEngine.can_change_status(
                     device, target_status, self.user, last_log
@@ -531,9 +520,6 @@ class ScanTab(QWidget):
                     device.status = new_status
                     device.current_worker_id = None
                     action_type = 'COMPLETED'
-                elif action == 'in_progress':
-                    device.status = workplace.workplace_type
-                    action_type = 'IN_PROGRESS'
                 elif action == 'defect':
                     device.status = 'DEFECT'
                     device.current_worker_id = None

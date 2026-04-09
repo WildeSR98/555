@@ -8,13 +8,16 @@ class WorkflowEngine:
     # Разрешенные переходы (откуда -> [куда])
     # Если старого статуса нет в списке, переход свободный (например, для начальных этапов)
     STRICT_TRANSITIONS = {
-        'ASSEMBLY': ['WAITING_VIBROSTAND', 'VIBROSTAND', 'DEFECT', 'REPAIR'],
-        'VIBROSTAND': ['TECH_CONTROL_1_1', 'TECH_CONTROL_1_2', 'DEFECT', 'REPAIR'],
+        'ASSEMBLY': ['WAITING_VIBROSTAND', 'REPAIR', 'DEFECT'],
+        'VIBROSTAND': ['WAITING_TECH_CONTROL_1_1', 'WAITING_TECH_CONTROL_1_2', 'REPAIR', 'DEFECT'],
+        'TECH_CONTROL_1_1': ['WAITING_FUNC_CONTROL', 'REPAIR', 'DEFECT'],
+        'TECH_CONTROL_1_2': ['WAITING_FUNC_CONTROL', 'REPAIR', 'DEFECT'],
+        'FUNC_CONTROL': ['WAITING_TECH_CONTROL_2_1', 'WAITING_TECH_CONTROL_2_2', 'REPAIR', 'DEFECT'],
+        'TECH_CONTROL_2_1': ['WAITING_PACKING', 'REPAIR', 'DEFECT'],
+        'TECH_CONTROL_2_2': ['WAITING_PACKING', 'REPAIR', 'DEFECT'],
         'REPAIR': [
-            'WAITING_VIBROSTAND', 'VIBROSTAND', 
-            'TECH_CONTROL_1_1', 'TECH_CONTROL_1_2', 
-            'WAITING_PACKING', 'PACKING',
-            'WAITING_ASSEMBLY', 'ASSEMBLY'
+            'WAITING_VIBROSTAND', 'WAITING_TECH_CONTROL_1_1', 'WAITING_TECH_CONTROL_1_2', 
+            'WAITING_PACKING', 'WAITING_ASSEMBLY', 'WAITING_PRE_PRODUCTION'
         ]
     }
 
@@ -71,7 +74,7 @@ class WorkflowEngine:
         allowed_types = [
             'VIBROSTAND', 'FUNC_CONTROL', 'TECH_CONTROL_1_1', 
             'TECH_CONTROL_1_2', 'TECH_CONTROL_2_1', 'TECH_CONTROL_2_2',
-            'PACKING', 'WAREHOUSE'
+            'PACKING', 'ACCOUNTING', 'WAREHOUSE'
         ]
         return workplace_type in allowed_types
 

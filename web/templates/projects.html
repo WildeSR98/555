@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block title %}Проекты — Production Manager{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>📁 Проекты</h2>
+    <p class="text-muted">Управление производственными проектами</p>
+</div>
+
+<div class="card">
+    <table class="table">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Код</th>
+                <th>Название</th>
+                <th>Описание</th>
+                <th>Спецификация</th>
+                <th>Создан</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for project in projects %}
+            <tr>
+                <td>{{ project.id }}</td>
+                <td><code>{{ project.code }}</code></td>
+                <td>{{ project.name }}</td>
+                <td class="text-truncate" title="{{ project.description }}">{{ project.description or '—' }}</td>
+                <td>
+                    {% if project.spec_link %}
+                    <a href="{{ project.spec_link }}" target="_blank">📄 Открыть</a>
+                    {% else %}
+                    —
+                    {% endif %}
+                </td>
+                <td>{{ project.created_at.strftime('%d.%m.%Y') if project.created_at else '—' }}</td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="6" class="text-center text-muted">Нет проектов</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}Устройства — Production Manager{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>🔧 Устройства</h2>
+    <p class="text-muted">Все устройства в системе</p>
+</div>
+
+<div class="card">
+    <table class="table">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Серийный номер</th>
+                <th>Модель</th>
+                <th>Статус</th>
+                <th>Создан</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for device in devices %}
+            <tr>
+                <td>{{ device.id }}</td>
+                <td><code>{{ device.serial_number }}</code></td>
+                <td>{{ device.name or '—' }}</td>
+                <td><span class="badge status-{{ device.status|lower }}">{{ device.status }}</span></td>
+                <td>{{ device.created_at.strftime('%d.%m.%Y') if device.created_at else '—' }}</td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="5" class="text-center text-muted">Нет устройств</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

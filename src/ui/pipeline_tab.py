@@ -68,31 +68,42 @@ class PipelineTab(QWidget):
         self.cards_grid.setSpacing(12)
         self.cards_grid.setContentsMargins(0, 0, 0, 0)
 
-        # Основной конвейер (строка 0)
-        main_stages = [
-            ('PRE_PRODUCTION', 'Подготовка'),
-            ('ASSEMBLY', 'Сборка'),
-            ('VIBROSTAND', 'Вибростенд'),
-            ('TECH_CONTROL_1_1', 'ОТК 1.1'),
-            ('TECH_CONTROL_1_2', 'ОТК 1.2'),
-            ('FUNC_CONTROL', 'Тестирование'),
-            ('TECH_CONTROL_2_1', 'ОТК 2.1'),
-            ('TECH_CONTROL_2_2', 'ОТК 2.2'),
-            ('PACKING', 'Упаковка'),
-            ('ACCOUNTING', 'Учёт'),
-        ]
-
         # Добавляем метку "КОНВЕЙЕР"
         conv_label = QLabel('КОНВЕЙЕР ➜')
         conv_label.setStyleSheet(f'font-size: 11px; font-weight: bold; color: {COLORS["text_muted"]};')
         conv_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.cards_grid.addWidget(conv_label, 0, 0)
+        self.cards_grid.addWidget(conv_label, 0, 0, 2, 1)
 
-        for col, (code, label) in enumerate(main_stages, start=1):
-            card = PipelineCard(code, label)
-            card.clicked.connect(self._on_stage_clicked)
-            self.cards[code] = card
-            self.cards_grid.addWidget(card, 0, col)
+        # Основной конвейер (статусы ожидания и работы)
+        main_stages = [
+            ('WAITING_KITTING', 'WAITING_PRE_PRODUCTION', 'Комплектовка'),
+            ('WAITING_PRE_PRODUCTION', 'PRE_PRODUCTION', 'Подготовка'),
+            ('WAITING_ASSEMBLY', 'ASSEMBLY', 'Сборка'),
+            ('WAITING_VIBROSTAND', 'VIBROSTAND', 'Вибростенд'),
+            ('WAITING_TECH_CONTROL_1_1', 'TECH_CONTROL_1_1', 'ОТК 1.1'),
+            ('WAITING_TECH_CONTROL_1_2', 'TECH_CONTROL_1_2', 'ОТК 1.2'),
+            ('WAITING_FUNC_CONTROL', 'FUNC_CONTROL', 'Тестирование'),
+            ('WAITING_TECH_CONTROL_2_1', 'TECH_CONTROL_2_1', 'ОТК 2.1'),
+            ('WAITING_TECH_CONTROL_2_2', 'TECH_CONTROL_2_2', 'ОТК 2.2'),
+            ('WAITING_PACKING', 'PACKING', 'Упаковка'),
+            ('WAITING_ACCOUNTING', 'ACCOUNTING', 'Учёт'),
+        ]
+
+
+
+        for col, (w_code, i_code, label) in enumerate(main_stages, start=1):
+            # Карточка ожидания (маленькая)
+            w_card = PipelineCard(w_code, f"Ожид. {label}")
+            w_card.setMinimumHeight(60)
+            w_card.clicked.connect(self._on_stage_clicked)
+            self.cards[w_code] = w_card
+            self.cards_grid.addWidget(w_card, 0, col)
+
+            # Карточка в работе (основная)
+            i_card = PipelineCard(i_code, label)
+            i_card.clicked.connect(self._on_stage_clicked)
+            self.cards[i_code] = i_card
+            self.cards_grid.addWidget(i_card, 1, col)
 
         # Дополнительные статусы (строка 1)
         extra_stages = [
@@ -106,13 +117,13 @@ class PipelineTab(QWidget):
         extra_label = QLabel('СТАТУСЫ ↓')
         extra_label.setStyleSheet(f'font-size: 11px; font-weight: bold; color: {COLORS["text_muted"]};')
         extra_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.cards_grid.addWidget(extra_label, 1, 0)
+        self.cards_grid.addWidget(extra_label, 2, 0)
 
         for col, (code, label) in enumerate(extra_stages, start=1):
             card = PipelineCard(code, label)
             card.clicked.connect(self._on_stage_clicked)
             self.cards[code] = card
-            self.cards_grid.addWidget(card, 1, col)
+            self.cards_grid.addWidget(card, 2, col)
 
         cards_scroll.setWidget(cards_inner)
         splitter.addWidget(cards_scroll)

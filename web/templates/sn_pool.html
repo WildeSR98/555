@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block title %}SN Пул — Production Manager{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>🏷️ Пул серийных номеров</h2>
+    <p class="text-muted">Управление пулом SN</p>
+</div>
+
+<div class="card">
+    <table class="table">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Код</th>
+                <th>Модель ID</th>
+                <th>Использован</th>
+                <th>Устройство ID</th>
+                <th>Создан</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for sn in serial_numbers %}
+            <tr>
+                <td>{{ sn.id }}</td>
+                <td><code>{{ sn.code }}</code></td>
+                <td>{{ sn.model_id or '—' }}</td>
+                <td>
+                    {% if sn.is_used %}
+                    <span class="badge badge-success">✓ Использован</span>
+                    {% else %}
+                    <span class="badge badge-warning">○ Свободен</span>
+                    {% endif %}
+                </td>
+                <td>{{ sn.device_id or '—' }}</td>
+                <td>{{ sn.created_at.strftime('%d.%m.%Y') if sn.created_at else '—' }}</td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="6" class="text-center text-muted">Нет серийных номеров</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

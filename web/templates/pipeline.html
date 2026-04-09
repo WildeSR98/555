@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block title %}Конвейер — Production Manager{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>🔄 Конвейер производства</h2>
+    <p class="text-muted">Устройства в процессе производства</p>
+</div>
+
+<div class="pipeline-grid">
+    {% for device in devices %}
+    <div class="pipeline-card status-{{ device.status|lower }}">
+        <div class="pipeline-header">
+            <h3>{{ device.serial_number }}</h3>
+            <span class="badge status-{{ device.status|lower }}">{{ device.status }}</span>
+        </div>
+        <div class="pipeline-info">
+            <p><strong>Модель:</strong> {{ device.name or '—' }}</p>
+        </div>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <p>Нет устройств в производстве</p>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}

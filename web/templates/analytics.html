@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+
+{% block title %}Аналитика — Production Manager{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>📈 Аналитика</h2>
+    <p class="text-muted">Детальная статистика производства</p>
+</div>
+
+<!-- Device Status Chart -->
+<div class="card">
+    <h3>Устройства по статусам</h3>
+    <div class="chart-container">
+        <canvas id="deviceStatusChart"></canvas>
+    </div>
+</div>
+
+<!-- Monthly Activity Chart -->
+<div class="card">
+    <h3>Активность за 30 дней</h3>
+    <div class="chart-container">
+        <canvas id="monthlyActivityChart"></canvas>
+    </div>
+</div>
+
+<!-- Top Users -->
+<div class="card">
+    <h3>Топ пользователей</h3>
+    <table class="table">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Пользователь</th>
+                <th>Количество работ</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for user in top_users %}
+            <tr>
+                <td>{{ loop.index }}</td>
+                <td>{{ user.name }} (@{{ user.username }})</td>
+                <td><strong>{{ user.count }}</strong></td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="3" class="text-center text-muted">Нет данных</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const deviceStatusData = {{ device_status | tojson }};
+const weeklyWorkData = {{ weekly_work | tojson }};
+
+// График статусов устройств
+const statusLabels = Object.keys(deviceStatusData);
+const statusValues = Object.values(deviceStatusData);
+
+const ctx1 = document.getElementById('deviceStatusChart').getContext('2d');
+new Chart(ctx1, {
+    type: 'pie',
+    data: {
+        labels: statusLabels,
+        datasets: [{
+            data: statusValues,
+            backgroundColor: [
+                '#10b981', '#f59e0b', '#ef4444', '#6366f1', 
+                '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'
+            ]
+        }]
+    },
+    options: {
+        responsive: true,
+        plugins: {
+            legend: { position: 'bottom' }
+        }
+    }
+});
+
+// График активности за 30 дней
+if (weeklyWorkData.length > 0) {
+    const ctx2 = document.getElementById('monthlyActivityChart').getContext('2d');
+    new Chart(ctx2, {
+        type: 'bar',
+        data: {
+            labels: weeklyWorkData.map(d => d.date),
+            datasets: [{
+                label: 'Работ в день',
+                data: weeklyWorkData.map(d => d.count),
+                backgroundColor: '#4f46e5',
+                borderRadius: 4,
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { display: false }
+            },
+            scales: {
+                y: { beginAtZero: true }
+            }
+        }
+    });
+}
+</script>
+{% endblock %}

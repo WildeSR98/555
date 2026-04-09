@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}Скан — Production Manager{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>📷 Сканирование</h2>
+    <p class="text-muted">Сканирование QR-кодов и штрихкодов</p>
+</div>
+
+<div class="scan-container">
+    <div class="card">
+        <h3>Ввод серийного номера</h3>
+        <form id="scanForm" class="scan-form">
+            <div class="form-group">
+                <input type="text" id="snInput" placeholder="Отсканируйте или введите SN..." 
+                       autofocus class="input-large">
+            </div>
+            <button type="submit" class="btn btn-primary">Сканировать</button>
+        </form>
+        <div id="scanResult" class="scan-result"></div>
+    </div>
+</div>
+
+<script>
+document.getElementById('scanForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const sn = document.getElementById('snInput').value.trim();
+    if (!sn) return;
+    
+    const resultDiv = document.getElementById('scanResult');
+    resultDiv.innerHTML = '<p class="text-muted">Обработка...</p>';
+    
+    try {
+        const response = await fetch(`/api/devices?search=${encodeURIComponent(sn)}`);
+        const devices = await response.json();
+        
+        if (devices.length > 0) {
+            const device = devices[0];
+            resultDiv.innerHTML = `
+                <div class="alert alert-success">
+                    <h4>Устройство найдено</h4>
+                    <p><strong>SN:</strong> ${device.sn}</p>
+                    <p><strong>Модель:</strong> ${device.model || '—'}</p>
+                    <p><strong>Статус:</strong> ${device.status}</p>
+                </div>
+            `;
+        } else {
+            resultDiv.innerHTML = '<div class="alert alert-error">Устройство не найдено</div>';
+        }
+    } catch (error) {
+        resultDiv.innerHTML = `<div class="alert alert-error">Ошибка: ${error.message}</div>`;
+    }
+    
+    document.getElementById('snInput').value = '';
+    document.getElementById('snInput').focus();
+});
+</script>
+{% endblock %}
