@@ -3,37 +3,128 @@
 {% block title %}Устройства — Production Manager{% endblock %}
 
 {% block content %}
-<div class="page-header">
-    <h2>🔧 Устройства</h2>
-    <p class="text-muted">Все устройства в системе</p>
+<div class="page-header" style="margin-bottom: 30px;">
+    <h2>🔍 Поиск устройства (статус и история)</h2>
+    <p class="text-muted">Просмотр истории сборочных операций по серийному номеру</p>
 </div>
 
-<div class="card">
-    <table class="table">
-        <thead>
-            <tr>
-                <th>ID</th>
-                <th>Серийный номер</th>
-                <th>Модель</th>
-                <th>Статус</th>
-                <th>Создан</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for device in devices %}
-            <tr>
-                <td>{{ device.id }}</td>
-                <td><code>{{ device.serial_number }}</code></td>
-                <td>{{ device.name or '—' }}</td>
-                <td><span class="badge status-{{ device.status|lower }}">{{ device.status }}</span></td>
-                <td>{{ device.created_at.strftime('%d.%m.%Y') if device.created_at else '—' }}</td>
-            </tr>
-            {% else %}
-            <tr>
-                <td colspan="5" class="text-center text-muted">Нет устройств</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+<div class="card" style="margin-bottom: 20px; display: flex; gap: 15px; align-items: center; padding: 20px;">
+    <input type="text" id="searchInput" placeholder="Введите серийный номер (SN)..." class="input-large" style="flex:1; font-family: monospace; font-size: 1.2rem;" onkeypress="if(event.key === 'Enter') searchDevice()">
+    <button class="btn btn-primary" style="padding: 12px 30px; font-size: 1.1rem;" onclick="searchDevice()">Найти</button>
 </div>
+
+<div id="notFoundMsg" class="alert alert-error" style="display:none; text-align:center; font-weight:bold; margin-bottom: 20px;">
+    Устройство с таким SN не найдено
+</div>
+
+<div id="resultContainer" style="display:none;">
+    
+    <!-- Карточка устройства -->
+    <div class="card" style="margin-bottom: 20px;">
+        <h3 style="border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-bottom: 15px;">
+            💻 Устройство: <span id="devName"></span>
+        </h3>
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+            <table class="table" style="background: transparent; border: none;">
+                <tbody>
+                    <tr><td style="font-weight:600; width:40%;">Серийный номер (SN)</td><td><code id="devSn" style="font-size:1.1em;"></code></td></tr>
+                    <tr><td style="font-weight:600;">Партномер (PN)</td><td id="devPn"></td></tr>
+                    <tr><td style="font-weight:600;">Тип</td><td id="devType"></td></tr>
+                    <tr><td style="font-weight:600;">Полуфабрикат</td><td id="devSemifinished"></td></tr>
+                </tbody>
+            </table>
+            <table class="table" style="background: transparent; border: none;">
+                <tbody>
+                    <tr><td style="font-weight:600; width:40%;">Текущий статус</td><td><span class="badge" id="devStatus" style="color:white;"></span></td></tr>
+                    <tr><td style="font-weight:600;">Проект</td><td id="devProject"></td></tr>
+                    <tr><td style="font-weight:600;">Работник</td><td id="devWorker"></td></tr>
+                    <tr><td style="font-weight:600;">Создано</td><td id="devCreated"></td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- История логов -->
+    <div class="card">
+        <h3 style="margin-bottom: 15px;">📜 История производственных действий</h3>
+        
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Время</th>
+                    <th>Действие</th>
+                    <th>Рабочее место</th>
+                    <th>Работник</th>
+                    <th>Изменение статуса</th>
+                    <th>Примечания</th>
+                </tr>
+            </thead>
+            <tbody id="historyBody">
+            </tbody>
+        </table>
+    </div>
+
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+async function searchDevice() {
+    const sn = document.getElementById('searchInput').value.trim();
+    if (!sn) return;
+
+    document.getElementById('notFoundMsg').style.display = 'none';
+    document.getElementById('resultContainer').style.display = 'none';
+
+    try {
+        const resp = await fetch(`/api/devices/search?sn=${encodeURIComponent(sn)}`);
+        const res = await resp.json();
+
+        if (resp.ok) {
+            // Карточка
+            document.getElementById('devName').textContent = res.device.name;
+            document.getElementById('devSn').textContent = res.device.sn || '—';
+            document.getElementById('devPn').textContent = res.device.pn || '—';
+            document.getElementById('devType').textContent = res.device.type;
+            
+            const badge = document.getElementById('devStatus');
+            badge.textContent = res.device.status_display;
+            badge.style.backgroundColor = res.device.badge_color;
+
+            document.getElementById('devSemifinished').textContent = res.device.is_semifinished ? 'Да' : 'Нет';
+            document.getElementById('devProject').textContent = res.device.project;
+            document.getElementById('devWorker').textContent = res.device.worker;
+            document.getElementById('devCreated').textContent = res.device.created_at;
+
+            // История таблица
+            const tbody = document.getElementById('historyBody');
+            
+            if (res.history.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">История пуста</td></tr>';
+            } else {
+                tbody.innerHTML = res.history.map(row => `
+                    <tr>
+                        <td style="white-space: nowrap;">${row.created_at}</td>
+                        <td><strong>${row.action}</strong></td>
+                        <td>${row.workplace}</td>
+                        <td>${row.worker}</td>
+                        <td><span style="font-size: 13px; color: var(--text-muted);">${row.status_change}</span></td>
+                        <td>${row.notes}</td>
+                    </tr>
+                `).join('');
+            }
+
+            document.getElementById('resultContainer').style.display = 'block';
+        } else {
+            const msg = document.getElementById('notFoundMsg');
+            msg.textContent = res.detail || 'Устройство не найдено';
+            msg.style.display = 'block';
+        }
+    } catch (e) {
+        alert('Ошибка: ' + e.message);
+    }
+}
+</script>
 {% endblock %}

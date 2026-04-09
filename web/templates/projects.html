@@ -3,45 +3,333 @@
 {% block title %}Проекты — Production Manager{% endblock %}
 
 {% block content %}
-<div class="page-header">
-    <h2>📁 Проекты</h2>
-    <p class="text-muted">Управление производственными проектами</p>
+<div class="page-header" style="display:flex; justify-content:space-between; align-items:center;">
+    <div>
+        <h2>📋 Проекты</h2>
+        <p class="text-muted">Дерево проектов, устройств и операций</p>
+    </div>
+    <div style="display:flex; gap:10px;">
+        <input type="text" id="searchInput" placeholder="🔍 Поиск по коду, имени..." class="input-large" style="width:250px;" oninput="filterTree()">
+        <select id="statusFilter" class="input-large" onchange="loadTree()">
+            <option value="">Все статусы</option>
+            {% for code, name in status_choices.items() %}
+            <option value="{{ code }}">{{ name }}</option>
+            {% endfor %}
+        </select>
+        <button class="btn btn-primary" onclick="loadTree()">⟳ Обновить</button>
+        <button class="btn btn-success" onclick="openCreateModal()">➕ Создать</button>
+    </div>
 </div>
 
-<div class="card">
-    <table class="table">
-        <thead>
-            <tr>
-                <th>ID</th>
-                <th>Код</th>
-                <th>Название</th>
-                <th>Описание</th>
-                <th>Спецификация</th>
-                <th>Создан</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for project in projects %}
-            <tr>
-                <td>{{ project.id }}</td>
-                <td><code>{{ project.code }}</code></td>
-                <td>{{ project.name }}</td>
-                <td class="text-truncate" title="{{ project.description }}">{{ project.description or '—' }}</td>
-                <td>
-                    {% if project.spec_link %}
-                    <a href="{{ project.spec_link }}" target="_blank">📄 Открыть</a>
-                    {% else %}
-                    —
-                    {% endif %}
-                </td>
-                <td>{{ project.created_at.strftime('%d.%m.%Y') if project.created_at else '—' }}</td>
-            </tr>
-            {% else %}
-            <tr>
-                <td colspan="6" class="text-center text-muted">Нет проектов</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+<div style="display:grid; grid-template-columns: 2fr 1fr; gap:20px; height: calc(100vh - 180px);">
+    
+    <!-- Дерево -->
+    <div class="card" style="overflow-y:auto; padding:10px;">
+        <table class="table" style="width:100%; border-collapse: collapse;" id="treeTable">
+            <thead>
+                <tr>
+                    <th style="text-align:left;">Элемент</th>
+                    <th>Код</th>
+                    <th>Статус</th>
+                    <th>SN / PN</th>
+                </tr>
+            </thead>
+            <tbody id="treeBody">
+                <tr><td colspan="4" class="text-center text-muted">Загрузка...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Детали -->
+    <div class="card" style="overflow-y:auto;" id="detailsPanel">
+        <h3 id="detailsTitle" style="word-wrap: break-word;">Выберите элемент</h3>
+        
+        <!-- Статистика проекта -->
+        <div id="projectStats" style="display:none; gap:10px; margin-bottom: 20px;">
+            <div class="stat-mini" style="border:1px solid var(--border); padding:10px; border-radius:8px; flex:1;">
+                <div style="font-size:10px; font-weight:bold; color:var(--text-muted);">⚪ ОЖИД.</div>
+                <div style="font-size:18px; font-weight:bold;" id="statNotStarted">0</div>
+            </div>
+            <div class="stat-mini" style="border:1px solid var(--border); padding:10px; border-radius:8px; flex:1;">
+                <div style="font-size:10px; font-weight:bold; color:#3b82f6;">🟡 РАБОТ.</div>
+                <div style="font-size:18px; font-weight:bold;" id="statInWork">0</div>
+            </div>
+            <div class="stat-mini" style="border:1px solid var(--border); padding:10px; border-radius:8px; flex:1;">
+                <div style="font-size:10px; font-weight:bold; color:var(--success);">🟢 ГОТОВ.</div>
+                <div style="font-size:18px; font-weight:bold;" id="statDone">0</div>
+            </div>
+        </div>
+
+        <table class="table" id="detailsTable" style="display:none;">
+            <thead><tr><th>Поле</th><th>Значение</th></tr></thead>
+            <tbody id="detailsBody"></tbody>
+        </table>
+
+        <div style="text-align:right; margin-top:20px;">
+            <button id="btnDelete" class="btn btn-danger" style="display:none;" onclick="deleteProject()">🗑 Удалить проект</button>
+        </div>
+    </div>
 </div>
+
+<!-- Модалка: Создать проект -->
+<div id="createModal" class="modal-overlay" style="display:none;">
+    <div class="modal-card" style="width: 700px; max-height:90vh; overflow-y:auto;">
+        <h3>➕ Создать проект</h3>
+        <form id="createForm" onsubmit="submitCreate(event)">
+            <div class="form-group"><label>Код проекта:</label><input type="text" id="pCode"></div>
+            <div class="form-group"><label>Название (обязательно):</label><input type="text" id="pName" required></div>
+            <div class="form-group"><label>Ссылка на спеку:</label><input type="text" id="pLink" placeholder="https://..."></div>
+            <div class="form-group"><label>Проверочный код:</label><input type="text" id="pSpec"></div>
+            
+            <div class="form-group">
+                <label>Менеджер:</label>
+                <select id="pManager">
+                    <option value="">— Без менеджера —</option>
+                    {% for m in managers %}
+                    <option value="{{ m.id }}">{{ m.full_name }} ({{ m.username }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <h4 style="margin-top:20px; padding-bottom:10px; border-bottom:1px solid var(--border);">Устройства проекта (по партномерам)</h4>
+            <div id="deviceRows" style="margin-bottom:15px;"></div>
+            
+            <button type="button" class="btn btn-secondary" onclick="addDeviceRow()">➕ Добавить партномер</button>
+
+            <div class="modal-buttons" style="margin-top:20px;">
+                <button type="button" class="btn" style="background:var(--border);" onclick="closeModal('createModal')">Отмена</button>
+                <button type="submit" class="btn btn-primary">💾 Создать и сгенерировать SN</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<style>
+.tree-row { cursor: pointer; transition: background 0.1s; }
+.tree-row:hover { background: #f1f5f9; }
+.tree-child1 { font-size: 13px; }
+.tree-child2 { font-size: 12px; font-style: italic; color: #475569;}
+.badge-color { display:inline-block; padding: 2px 8px; border-radius: 999px; color: white; font-size:11px; font-weight:bold; }
+.dev-row { display:flex; gap:10px; margin-top:10px; align-items:center; }
+.dev-row select { flex: 2; padding:8px; border-radius:4px; border:1px solid var(--border); }
+.dev-row input[type=text] { flex: 1; padding:8px; border-radius:4px; border:1px solid var(--border); }
+.dev-row input[type=number] { width: 80px; padding:8px; border-radius:4px; border:1px solid var(--border); }
+</style>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let treeData = [];
+let currentProjectId = null;
+
+const deviceModels = [
+    {% for dm in device_models %}
+    { id: {{ dm.id }}, name: "{{ dm.category }} — {{ dm.name }}" },
+    {% endfor %}
+];
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadTree();
+});
+
+async function loadTree() {
+    const status = document.getElementById('statusFilter').value;
+    try {
+        const resp = await fetch(`/api/projects/tree?status=${status}`);
+        treeData = await resp.json();
+        renderTree();
+    } catch (e) {
+        alert('Ошибка загрузки: ' + e.message);
+    }
+}
+
+function renderTree(filterText = '') {
+    const tbody = document.getElementById('treeBody');
+    tbody.innerHTML = '';
+    
+    if (treeData.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">Нет данных</td></tr>';
+        return;
+    }
+
+    const ft = filterText.toLowerCase();
+
+    treeData.forEach(p => {
+        const matchP = !ft || p.name.toLowerCase().includes(ft) || (p.code && p.code.toLowerCase().includes(ft));
+        
+        let hasMatchChildren = false;
+        let cHTML = '';
+        
+        p.children.forEach(d => {
+            const matchD = matchP || d.name.toLowerCase().includes(ft) || (d.sn_pn && d.sn_pn.toLowerCase().includes(ft));
+            
+            let ccHTML = '';
+            d.children.forEach(op => {
+                ccHTML += `
+                    <tr class="tree-row tree-child2" onclick="loadDetails('operation', ${op.id})">
+                        <td style="padding-left: 50px;">⚙ ${op.name}</td>
+                        <td>${op.code || ''}</td>
+                        <td><span class="badge-color" style="background:${op.badge_color}">${op.status_display}</span></td>
+                        <td></td>
+                    </tr>
+                `;
+            });
+
+            if (matchD || !ft) {
+                hasMatchChildren = true;
+                cHTML += `
+                    <tr class="tree-row tree-child1" onclick="loadDetails('device', ${d.id})">
+                        <td style="padding-left: 25px;">💻 ${d.name}</td>
+                        <td>${d.code || ''}</td>
+                        <td><span class="badge-color" style="background:${d.badge_color}">${d.status_display}</span></td>
+                        <td><code>${d.sn_pn}</code></td>
+                    </tr>
+                ` + ccHTML;
+            }
+        });
+
+        if (matchP || hasMatchChildren || !ft) {
+            const tr = document.createElement('tr');
+            tr.className = 'tree-row';
+            tr.style.fontWeight = 'bold';
+            tr.onclick = () => loadDetails('project', p.id);
+            tr.innerHTML = `
+                <td>📁 ${p.name}</td>
+                <td>${p.code || ''}</td>
+                <td><span class="badge-color" style="background:${p.badge_color}">${p.status_display}</span></td>
+                <td></td>
+            `;
+            tbody.appendChild(tr);
+            tbody.insertAdjacentHTML('beforeend', cHTML);
+        }
+    });
+}
+
+function filterTree() {
+    renderTree(document.getElementById('searchInput').value);
+}
+
+async function loadDetails(type, id) {
+    if(type === 'project') currentProjectId = id;
+    else currentProjectId = null;
+    
+    document.getElementById('btnDelete').style.display = type === 'project' ? 'inline-block' : 'none';
+    
+    try {
+        const resp = await fetch(`/api/projects/${type}/${id}`);
+        if(!resp.ok) return;
+        const data = await resp.json();
+        
+        document.getElementById('detailsTitle').textContent = data.title;
+        document.getElementById('detailsTable').style.display = 'table';
+        
+        const tbody = document.getElementById('detailsBody');
+        tbody.innerHTML = data.fields.map(f => `<tr><td style="font-weight:600;width:40%;">${f.label}</td><td>${f.value}</td></tr>`).join('');
+        
+        const pStats = document.getElementById('projectStats');
+        if (type === 'project' && data.stats) {
+            document.getElementById('statNotStarted').textContent = data.stats.not_started;
+            document.getElementById('statInWork').textContent = data.stats.in_work;
+            document.getElementById('statDone').textContent = data.stats.done;
+            pStats.style.display = 'flex';
+        } else {
+            pStats.style.display = 'none';
+        }
+        
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+async function deleteProject() {
+    if (!currentProjectId) return;
+    if (!confirm('Вы уверены, что хотите удалить проект и ВСЕ его устройства?')) return;
+    
+    try {
+        const resp = await fetch(`/api/projects/${currentProjectId}`, {method: 'DELETE'});
+        if(resp.ok) {
+            alert('Удалено');
+            document.getElementById('detailsTable').style.display = 'none';
+            document.getElementById('detailsTitle').textContent = 'Выберите элемент';
+            document.getElementById('btnDelete').style.display = 'none';
+            document.getElementById('projectStats').style.display = 'none';
+            loadTree();
+        } else {
+            const r = await resp.json();
+            alert(r.detail || 'Ошибка');
+        }
+    } catch (e) {
+        alert(e);
+    }
+}
+
+// ------ Форма создания ------
+function openCreateModal() {
+    document.getElementById('createForm').reset();
+    document.getElementById('deviceRows').innerHTML = '';
+    addDeviceRow();
+    document.getElementById('createModal').style.display = 'flex';
+}
+
+function closeModal(id) {
+    document.getElementById(id).style.display = 'none';
+}
+
+function addDeviceRow() {
+    const container = document.getElementById('deviceRows');
+    const row = document.createElement('div');
+    row.className = 'dev-row';
+    
+    let opts = '<option value="" disabled selected>-- Выберите модель --</option>';
+    deviceModels.forEach(m => {
+        opts += `<option value="${m.id}">${m.name}</option>`;
+    });
+
+    row.innerHTML = `
+        <input type="text" class="dev-pn" placeholder="PN..." required>
+        <select class="dev-model" required>${opts}</select>
+        <input type="number" class="dev-qty" value="1" min="1" max="1000" required>
+        <button type="button" class="btn btn-danger" onclick="this.parentElement.remove()">❌</button>
+    `;
+    container.appendChild(row);
+}
+
+async function submitCreate(e) {
+    e.preventDefault();
+    
+    const rows = Array.from(document.querySelectorAll('.dev-row')).map(r => ({
+        part_number: r.querySelector('.dev-pn').value.trim(),
+        model_id: parseInt(r.querySelector('.dev-model').value),
+        qty: parseInt(r.querySelector('.dev-qty').value)
+    })).filter(x => x.part_number && x.model_id);
+    
+    const payload = {
+        code: document.getElementById('pCode').value,
+        name: document.getElementById('pName').value,
+        spec_link: document.getElementById('pLink').value,
+        spec_code: document.getElementById('pSpec').value,
+        manager_id: document.getElementById('pManager').value ? parseInt(document.getElementById('pManager').value) : null,
+        devices: rows
+    };
+    
+    try {
+        const resp = await fetch('/api/projects', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        });
+        const res = await resp.json();
+        if(resp.ok) {
+            alert(res.message);
+            closeModal('createModal');
+            loadTree();
+        } else {
+            alert(res.detail || 'Ошибка создания');
+        }
+    } catch(e) {
+        alert(e.message);
+    }
+}
+</script>
 {% endblock %}
