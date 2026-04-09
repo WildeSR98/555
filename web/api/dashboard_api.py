@@ -7,14 +7,14 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import datetime, timedelta
 
-from src.database import get_session
+from src.database import get_db
 from src.models import Workplace, WorkSession, Device, WorkLog
 
 router = APIRouter()
 
 
 @router.get("/")
-async def get_dashboard_stats(db: Session = Depends(get_session)):
+async def get_dashboard_stats(db: Session = Depends(get_db)):
     """Получить статистику дашборда."""
     total_workplaces = db.query(Workplace).count()
     active_sessions = db.query(WorkSession).filter_by(is_active=True).count()
@@ -45,7 +45,7 @@ async def get_dashboard_stats(db: Session = Depends(get_session)):
 
 
 @router.get("/chart-data")
-async def get_chart_data(db: Session = Depends(get_session)):
+async def get_chart_data(db: Session = Depends(get_db)):
     """Данные для графиков дашборда."""
     # Активность за последние 7 дней
     week_ago = datetime.now() - timedelta(days=7)
@@ -59,10 +59,10 @@ async def get_chart_data(db: Session = Depends(get_session)):
             {"date": str(row[0]), "count": row[1]} 
             for row in daily_activity
         ],
-        "workplaces_by_status": {
-            status: count 
-            for status, count in db.query(
-                Workplace.status, func.count(Workplace.id)
-            ).group_by(Workplace.status).all()
+        "workplaces_by_type": {
+            wp_type: count 
+            for wp_type, count in db.query(
+                Workplace.workplace_type, func.count(Workplace.id)
+            ).group_by(Workplace.workplace_type).all()
         },
     }

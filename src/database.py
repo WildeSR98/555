@@ -41,8 +41,17 @@ SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False, expi
 
 
 def get_session() -> Session:
-    """Получить новую сессию БД."""
+    """Получить новую сессию БД (для десктопного приложения)."""
     return SessionLocal()
+
+
+def get_db():
+    """Генератор сессий для FastAPI Depends (автозакрытие после запроса)."""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 
 def test_connection() -> tuple[bool, str]:

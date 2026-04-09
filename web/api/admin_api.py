@@ -6,14 +6,14 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
-from src.database import get_session
+from src.database import get_db
 from src.models import User, WorkLog
 
 router = APIRouter()
 
 
 @router.get("/users")
-async def get_users(db: Session = Depends(get_session)):
+async def get_users(db: Session = Depends(get_db)):
     """Получить всех пользователей."""
     users = db.query(User).order_by(User.date_joined.desc()).all()
     
@@ -35,7 +35,7 @@ async def get_users(db: Session = Depends(get_session)):
 
 
 @router.get("/stats")
-async def get_admin_stats(db: Session = Depends(get_session)):
+async def get_admin_stats(db: Session = Depends(get_db)):
     """Получить статистику для админки."""
     total_users = db.query(User).count()
     active_users = db.query(User).filter_by(is_active=True).count()

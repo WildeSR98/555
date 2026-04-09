@@ -7,14 +7,14 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import datetime, timedelta
 
-from src.database import get_session
+from src.database import get_db
 from src.models import Device, WorkLog, User, Workplace
 
 router = APIRouter()
 
 
 @router.get("/")
-async def get_analytics_summary(db: Session = Depends(get_session)):
+async def get_analytics_summary(db: Session = Depends(get_db)):
     """Общая сводка аналитики."""
     # Устройства по статусам
     device_status = db.query(
@@ -32,7 +32,7 @@ async def get_analytics_summary(db: Session = Depends(get_session)):
     top_users = db.query(
         User.id, User.username, User.first_name, User.last_name,
         func.count(WorkLog.id).label('count')
-    ).join(WorkLog, WorkLog.user_id == User.id).group_by(User.id).order_by(
+    ).join(WorkLog, WorkLog.worker_id == User.id).group_by(User.id).order_by(
         func.count(WorkLog.id).desc()
     ).limit(10).all()
     
@@ -55,10 +55,10 @@ async def get_analytics_summary(db: Session = Depends(get_session)):
 
 
 @router.get("/devices")
-async def get_device_analytics(db: Session = Depends(get_session)):
+async def get_device_analytics(db: Session = Depends(get_db)):
     """Аналитика по устройствам."""
     devices = db.query(
-        Device.id, Device.sn, Device.model, Device.status,
+        Device.id, Device.serial_number, Device.device_type, Device.status,
         func.count(WorkLog.id).label('work_count')
     ).outerjoin(WorkLog, WorkLog.device_id == Device.id).group_by(Device.id).all()
     
@@ -75,14 +75,14 @@ async def get_device_analytics(db: Session = Depends(get_session)):
 
 
 @router.get("/users")
-async def get_user_analytics(db: Session = Depends(get_session)):
+async def get_user_analytics(db: Session = Depends(get_db)):
     """Аналитика по пользователям."""
     users = db.query(User).all()
     result = []
     
     for user in users:
-        work_count = db.query(func.count(WorkLog.id)).filter(WorkLog.user_id == user.id).scalar()
-        last_work = db.query(WorkLog).filter(WorkLog.user_id == user.id).order_by(WorkLog.created_at.desc()).first()
+        work_count = db.query(func.count(WorkLog.id)).filter(WorkLog.worker_id == user.id).scalar()
+        last_work = db.query(WorkLog).filter(WorkLog.worker_id == user.id).order_by(WorkLog.created_at.desc()).first()
         
         result.append({
             "id": user.id,
