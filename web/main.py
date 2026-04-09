@@ -72,7 +72,7 @@ app.include_router(admin.router, prefix="", tags=["Pages"])
 # API эндпоинты (JSON)
 # =============================================
 
-from web.api import dashboard_api, analytics_api, projects_api, pipeline_api, devices_api, sn_pool_api, admin_api
+from web.api import dashboard_api, analytics_api, projects_api, pipeline_api, devices_api, sn_pool_api, admin_api, scan_api
 
 app.include_router(dashboard_api.router, prefix="/api/dashboard", tags=["API Dashboard"])
 app.include_router(analytics_api.router, prefix="/api/analytics", tags=["API Analytics"])
@@ -81,6 +81,7 @@ app.include_router(pipeline_api.router, prefix="/api/pipeline", tags=["API Pipel
 app.include_router(devices_api.router, prefix="/api/devices", tags=["API Devices"])
 app.include_router(sn_pool_api.router, prefix="/api/sn-pool", tags=["API SN Pool"])
 app.include_router(admin_api.router, prefix="/api/admin", tags=["API Admin"])
+app.include_router(scan_api.router, prefix="/api/scan", tags=["API Scan"])
 
 
 # =============================================

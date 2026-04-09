@@ -4,143 +4,109 @@
 
 {% block content %}
 <div class="page-header">
-    <h2>📊 Дашборд</h2>
+    <h2>🏭 Дашборд</h2>
     <p class="text-muted">Обзор производственной активности</p>
 </div>
 
-<!-- Stats Cards -->
+<!-- 4 сводные карточки -->
 <div class="stats-grid">
-    <div class="stat-card">
-        <div class="stat-icon">🏢</div>
-        <div class="stat-info">
-            <div class="stat-value">{{ total_workplaces }}</div>
-            <div class="stat-label">Рабочих мест</div>
-        </div>
-    </div>
-
-    <div class="stat-card">
-        <div class="stat-icon">🔥</div>
-        <div class="stat-info">
-            <div class="stat-value">{{ active_sessions }}</div>
-            <div class="stat-label">Активных смен</div>
-        </div>
-    </div>
-
-    <div class="stat-card">
+    <div class="stat-card" style="border-top: 3px solid var(--primary);">
         <div class="stat-icon">🔧</div>
         <div class="stat-info">
-            <div class="stat-value">{{ total_devices }}</div>
-            <div class="stat-label">Устройств</div>
+            <div class="stat-value" style="color: var(--primary);">{{ total_devices }}</div>
+            <div class="stat-label">Всего устройств</div>
         </div>
     </div>
 
-    <div class="stat-card">
-        <div class="stat-icon">📋</div>
+    <div class="stat-card" style="border-top: 3px solid var(--success);">
+        <div class="stat-icon">✅</div>
         <div class="stat-info">
-            <div class="stat-value">{{ recent_worklogs|length }}</div>
-            <div class="stat-label">Последних работ</div>
+            <div class="stat-value" style="color: var(--success);">{{ completed_today }}</div>
+            <div class="stat-label">Завершено сегодня</div>
+        </div>
+    </div>
+
+    <div class="stat-card" style="border-top: 3px solid var(--error);">
+        <div class="stat-icon">⚠️</div>
+        <div class="stat-info">
+            <div class="stat-value" style="color: var(--error);">{{ defects }}</div>
+            <div class="stat-label">В браке</div>
+        </div>
+    </div>
+
+    <div class="stat-card" style="border-top: 3px solid var(--info);">
+        <div class="stat-icon">⚡</div>
+        <div class="stat-info">
+            <div class="stat-value" style="color: var(--info);">{{ active_sessions_count }}</div>
+            <div class="stat-label">Активные сессии</div>
         </div>
     </div>
 </div>
 
-<!-- Charts -->
-<div class="charts-grid">
-    <div class="chart-card">
-        <h3>Активность за последние 7 дней</h3>
-        <canvas id="activityChart"></canvas>
+<!-- Две колонки: Рабочие места | Активные сессии -->
+<div class="dashboard-columns">
+    <!-- Рабочие места -->
+    <div class="card">
+        <h3>📋 Рабочие места</h3>
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Название</th>
+                    <th>Тип</th>
+                    <th>Пул</th>
+                    <th>Статус</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for wp in workplaces %}
+                <tr>
+                    <td>{{ wp.name }}</td>
+                    <td>{{ wp.type }}</td>
+                    <td>{{ wp.pool }}</td>
+                    <td>
+                        {% if wp.active_count > 0 %}
+                        <span class="badge badge-success">🟢 {{ wp.active_count }} работн.</span>
+                        {% else %}
+                        <span class="text-muted">⚪ Свободно</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="4" class="text-center text-muted">Нет рабочих мест</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
     </div>
 
-    <div class="chart-card">
-        <h3>Устройства по статусам</h3>
-        <canvas id="deviceStatusChart"></canvas>
+    <!-- Активные сессии -->
+    <div class="card">
+        <h3>⚡ Активные сессии</h3>
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Работник</th>
+                    <th>Рабочее место</th>
+                    <th>Начало</th>
+                    <th>Длительность</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for sess in sessions %}
+                <tr>
+                    <td>{{ sess.worker }}</td>
+                    <td>{{ sess.workplace }}</td>
+                    <td>{{ sess.start }}</td>
+                    <td><span class="badge">{{ sess.duration }}</span></td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="4" class="text-center text-muted">Нет активных сессий</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
     </div>
 </div>
-
-<!-- Recent Work Logs -->
-<div class="card">
-    <h3>Последние работы</h3>
-    <table class="table">
-        <thead>
-            <tr>
-                <th>ID</th>
-                <th>Пользователь</th>
-                <th>Устройство</th>
-                <th>Действие</th>
-                <th>Дата</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for wl in recent_worklogs %}
-            <tr>
-                <td>{{ wl.id }}</td>
-                <td>{{ wl.worker.full_name if wl.worker else '—' }}</td>
-                <td>{{ wl.device.serial_number if wl.device else '—' }}</td>
-                <td>{{ wl.action }}</td>
-                <td>{{ wl.created_at.strftime('%d.%m.%Y %H:%M') if wl.created_at else '—' }}</td>
-            </tr>
-            {% else %}
-            <tr>
-                <td colspan="5" class="text-center text-muted">Нет данных</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</div>
-
-{% endblock %}
-
-{% block extra_js %}
-<script>
-    // Данные для графиков (встроены в страницу)
-    const activityData = {{ weekly_work | tojson if weekly_work else '[]' }};
-    const deviceStatusData = {{ device_status | tojson if device_status else '{}' }};
-
-    // График активности
-    if (activityData.length > 0) {
-        const ctx1 = document.getElementById('activityChart').getContext('2d');
-        new Chart(ctx1, {
-            type: 'line',
-            data: {
-                labels: activityData.map(d => d.date),
-                datasets: [{
-                    label: 'Работ',
-                    data: activityData.map(d => d.count),
-                    borderColor: '#4f46e5',
-                    backgroundColor: 'rgba(79, 70, 229, 0.1)',
-                    tension: 0.4,
-                    fill: true,
-                }]
-            },
-            options: {
-                responsive: true,
-                plugins: {
-                    legend: { display: false }
-                }
-            }
-        });
-    }
-
-    // График статусов устройств
-    if (Object.keys(deviceStatusData).length > 0) {
-        const ctx2 = document.getElementById('deviceStatusChart').getContext('2d');
-        new Chart(ctx2, {
-            type: 'doughnut',
-            data: {
-                labels: Object.keys(deviceStatusData),
-                datasets: [{
-                    data: Object.values(deviceStatusData),
-                    backgroundColor: [
-                        '#10b981', '#f59e0b', '#ef4444', '#6366f1', '#8b5cf6'
-                    ]
-                }]
-            },
-            options: {
-                responsive: true,
-                plugins: {
-                    legend: { position: 'bottom' }
-                }
-            }
-        });
-    }
-</script>
 {% endblock %}
