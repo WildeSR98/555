@@ -7,7 +7,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
-from src.database import get_session
+from src.database import get_db
 from src.models import User
 from web.routes.auth import get_current_user
 from pathlib import Path
@@ -18,7 +18,7 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "web" / "templates"))
 
 
 @router.get("/admin")
-async def admin_page(request: Request, db: Session = Depends(get_session)):
+async def admin_page(request: Request, db: Session = Depends(get_db)):
     """Страница Admin Panel."""
     user = get_current_user(request)
     if not user or user.role != 'ADMIN':

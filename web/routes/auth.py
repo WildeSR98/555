@@ -9,7 +9,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
-from src.database import get_session
+from src.database import get_session, get_db
 from src.models import User
 from src.config import config
 from pathlib import Path
@@ -47,7 +47,7 @@ async def login_submit(
     request: Request,
     username: str = Form(...),
     password: str = Form(...),
-    db: Session = Depends(get_session),
+    db: Session = Depends(get_db),
 ):
     """Обработка входа."""
     import hashlib

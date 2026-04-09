@@ -24,7 +24,7 @@
             {% for sn in serial_numbers %}
             <tr>
                 <td>{{ sn.id }}</td>
-                <td><code>{{ sn.code }}</code></td>
+                <td><code>{{ sn.sn }}</code></td>
                 <td>{{ sn.model_id or '—' }}</td>
                 <td>
                     {% if sn.is_used %}
