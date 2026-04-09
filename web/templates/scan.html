@@ -204,7 +204,7 @@ async function processScan(e) {
     
     // Проверка, что еще не отсканирован
     if (state.devices.find(d => d.sn === sn)) {
-        showFeedback('warning', `SN ${sn} уже добавлен.`);
+        showFeedback('warning', `SN ${sn} уже есть в буфере на оплату/брак.`);
         document.getElementById('snInput').value = '';
         return;
     }
@@ -223,13 +223,20 @@ async function processScan(e) {
         const res = await resp.json();
         
         if (resp.ok) {
-            const dev = res.devices[0];
-            state.devices.push(dev);
+            // Если устройство только взято в работу, не добавляем в буфер
+            if (res.need_action) {
+                const dev = res.devices[0]; // TODO: handle multiple if bulk
+                state.devices.push(dev);
+                showToast(`Добавлено в буфер действий: ${dev.sn}`, 'success');
+                renderDevices();
+            } else {
+                showToast(`✅ Устройство ${sn} принято в работу (SCAN_IN)! Для завершения отсканируйте повторно когда закончите.`, 'info');
+            }
             
-            let msg = `Добавлено: ${dev.sn}`;
-            if (res.scan_in_count > 0) msg += ' (Устройство взято в работу)';
-            showFeedback('success', msg);
-            renderDevices();
+            // Если есть SCAN_IN но и need_action (например смешанный пакет, хотя у нас по одному)
+            if (res.scan_in_count > 0 && res.need_action) {
+                showToast(`Взято в работу и добавлено в буфер: ${sn}`, 'success');
+            }
         } else {
             showFeedback('error', res.detail || 'Ошибка');
         }

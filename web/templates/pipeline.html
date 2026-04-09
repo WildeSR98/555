@@ -11,24 +11,93 @@
     <button class="btn btn-primary" onclick="location.reload()">⟳ Обновить</button>
 </div>
 
+<style>
+.pipeline-wrapper {
+    overflow-x: auto;
+    padding-bottom: 15px;
+}
+.pipeline-stages {
+    display: flex;
+    gap: 15px;
+    align-items: flex-start;
+}
+.pipeline-stage-col {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 130px;
+    background: #f1f5f9;
+    padding: 10px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+}
+.pipeline-mini-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px;
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.2s;
+    box-shadow: var(--shadow);
+}
+.pipeline-mini-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+}
+.pipeline-active {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.2);
+}
+.pipeline-waiting { border-left: 3px solid var(--info); }
+.pipeline-working { border-left: 3px solid var(--primary); }
+.pipeline-defect { border-left: 3px solid var(--error); }
+.pipeline-done { border-left: 3px solid var(--success); }
+
+.pipeline-mini-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    font-weight: 600;
+    margin-bottom: 5px;
+}
+.pipeline-mini-count {
+    font-size: 1.5rem;
+    font-weight: bold;
+    color: var(--text);
+}
+.pipeline-extras {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 15px;
+}
+</style>
+
 <!-- Основной конвейер: карточки этапов -->
 <div class="conveyor-label" style="font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px;">Конвейер ➜</div>
 
-<div class="pipeline-stages">
-    {% for stage in stages %}
-    <div class="pipeline-stage-col">
-        <!-- Карточка ожидания -->
-        <div class="pipeline-mini-card pipeline-waiting" data-status="{{ stage.waiting_code }}" onclick="loadDevices('{{ stage.waiting_code }}', 'Ожид. {{ stage.label }}')">
-            <div class="pipeline-mini-label">Ожид.</div>
-            <div class="pipeline-mini-count">{{ stage.waiting_count }}</div>
+<div class="pipeline-wrapper">
+    <div class="pipeline-stages">
+        {% for stage in stages %}
+        <div class="pipeline-stage-col">
+            <!-- Карточка ожидания -->
+            <div class="pipeline-mini-card pipeline-waiting" data-status="{{ stage.waiting_code }}" onclick="loadDevices('{{ stage.waiting_code }}', 'Ожид. {{ stage.label }}')">
+                <div class="pipeline-mini-label">Ожид.</div>
+                <div class="pipeline-mini-count">{{ stage.waiting_count }}</div>
+            </div>
+            <!-- Карточка в работе -->
+            <div class="pipeline-mini-card pipeline-working" data-status="{{ stage.working_code }}" onclick="loadDevices('{{ stage.working_code }}', '{{ stage.label }}')">
+                <div class="pipeline-mini-label">{{ stage.label }}</div>
+                <div class="pipeline-mini-count">{{ stage.working_count }}</div>
+            </div>
         </div>
-        <!-- Карточка в работе -->
-        <div class="pipeline-mini-card pipeline-working" data-status="{{ stage.working_code }}" onclick="loadDevices('{{ stage.working_code }}', '{{ stage.label }}')">
-            <div class="pipeline-mini-label">{{ stage.label }}</div>
-            <div class="pipeline-mini-count">{{ stage.working_count }}</div>
+        {% if not loop.last %}
+        <div style="display:flex; align-items:center; padding-top:40px; color:var(--text-muted);">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
         </div>
+        {% endif %}
+        {% endfor %}
     </div>
-    {% endfor %}
 </div>
 
 <!-- Дополнительные статусы -->
@@ -37,7 +106,7 @@
 <div class="pipeline-extras">
     {% for extra in extras %}
     <div class="pipeline-mini-card pipeline-extra {% if extra.code == 'DEFECT' %}pipeline-defect{% elif extra.code == 'SHIPPED' or extra.code == 'QC_PASSED' %}pipeline-done{% endif %}"
-         data-status="{{ extra.code }}" onclick="loadDevices('{{ extra.code }}', '{{ extra.label }}')">
+         data-status="{{ extra.code }}" onclick="loadDevices('{{ extra.code }}', '{{ extra.label }}')" style="min-width: 130px;">
         <div class="pipeline-mini-label">{{ extra.label }}</div>
         <div class="pipeline-mini-count">{{ extra.count }}</div>
     </div>
@@ -62,7 +131,6 @@
     </table>
     <p id="devicesEmpty" class="text-muted text-center" style="display: none; padding: 20px;">Нет устройств на этом этапе</p>
 </div>
-
 {% endblock %}
 
 {% block extra_js %}
