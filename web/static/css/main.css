@@ -505,18 +505,41 @@ code {
 }
 
 /* =============================================
-   Responsive
+   Responsive Devices (Tablets & Mobile)
    ============================================= */
+
+@media (max-width: 1024px) {
+    /* Collapse grid layouts for projects and SN pool */
+    div[style*="grid-template-columns: 2fr 1fr"], 
+    div[style*="grid-template-columns: 350px 1fr"] {
+        grid-template-columns: 1fr !important;
+        height: auto !important;
+    }
+}
 
 @media (max-width: 768px) {
     .sidebar {
-        width: 100%;
-        height: auto;
-        position: relative;
+        left: -260px; /* Hidden by default on mobile, toggled via JS */
+        transition: left 0.3s ease;
     }
     
     .main-content {
         margin-left: 0;
+        padding: 1rem;
+        padding-top: 50px; /* Space for the hamburger menu */
+    }
+
+    .page-header {
+        flex-direction: column;
+        align-items: flex-start !important;
+        gap: 10px;
+    }
+
+    .page-header > div:nth-child(2) {
+        width: 100%;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
     }
     
     .stats-grid {
@@ -528,6 +551,15 @@ code {
     }
     
     .scan-form {
+        flex-direction: column;
+    }
+
+    .modal-card {
+        width: 95% !important;
+        padding: 1.5rem;
+    }
+
+    .dev-row {
         flex-direction: column;
     }
 }
