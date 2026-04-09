@@ -40,7 +40,7 @@ async def analytics_page(request: Request, db: Session = Depends(get_session)):
     # Топ пользователей по количеству работ
     top_users = db.query(
         User.username, User.first_name, User.last_name, func.count(WorkLog.id).label('count')
-    ).join(WorkLog, WorkLog.user_id == User.id).group_by(User.id).order_by(func.count(WorkLog.id).desc()).limit(10).all()
+    ).join(WorkLog, WorkLog.worker_id == User.id).group_by(User.id).order_by(func.count(WorkLog.id).desc()).limit(10).all()
 
     return templates.TemplateResponse("analytics.html", {
         "request": request,
