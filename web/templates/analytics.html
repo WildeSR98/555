@@ -3,110 +3,247 @@
 {% block title %}Аналитика — Production Manager{% endblock %}
 
 {% block content %}
-<div class="page-header">
-    <h2>📈 Аналитика</h2>
-    <p class="text-muted">Детальная статистика производства</p>
+<div class="page-header" style="display:flex; justify-content:space-between; align-items:center;">
+    <div>
+        <h2>📊 Аналитика производства</h2>
+        <p class="text-muted">Общая статистика и контроль сотрудников</p>
+    </div>
+    <button class="btn btn-primary" onclick="location.reload()">⟳ Обновить данные</button>
 </div>
 
-<!-- Device Status Chart -->
-<div class="card">
-    <h3>Устройства по статусам</h3>
-    <div class="chart-container">
-        <canvas id="deviceStatusChart"></canvas>
+<!-- Вкладки -->
+<div style="margin-bottom: 20px; display:flex; gap:10px; border-bottom: 1px solid var(--border);">
+    <button id="tabBtnGeneral" class="btn btn-secondary" style="border:none; border-bottom: 3px solid var(--primary); border-radius:0; background:transparent; font-weight:bold; color:var(--primary);" onclick="switchTab('general')">📈 Общая сводка</button>
+    <button id="tabBtnEmployee" class="btn btn-secondary" style="border:none; border-bottom: 3px solid transparent; border-radius:0; background:transparent; font-weight:bold; color:var(--text-muted);" onclick="switchTab('employee')">👤 По сотрудникам</button>
+</div>
+
+<!-- Контент: Общая сводка -->
+<div id="tabGeneral">
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px; margin-bottom:20px;">
+        <!-- Карточка 1: Статусы -->
+        <div class="card">
+            <h3>Устройства по статусам</h3>
+            <div class="chart-container" style="height:250px; position:relative;">
+                <canvas id="deviceStatusChart"></canvas>
+            </div>
+            <p id="noStatusData" style="display:none; text-align:center; color:var(--text-muted); margin-top:20px;">Нет данных</p>
+        </div>
+
+        <!-- Карточка 2: Тренд -->
+        <div class="card">
+            <h3>Завершено за 30 дней</h3>
+            <div class="chart-container" style="height:250px; position:relative;">
+                <canvas id="monthlyActivityChart"></canvas>
+            </div>
+            <p id="noTrendData" style="display:none; text-align:center; color:var(--text-muted); margin-top:20px;">Нет данных</p>
+        </div>
+    </div>
+    
+    <!-- Карточка 3: Топ юзеров -->
+    <div class="card">
+        <h3>Топ 10 работников</h3>
+        <table class="table" id="topUsersTable" style="display:none;">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Пользователь</th>
+                    <th>Выполнено операций</th>
+                </tr>
+            </thead>
+            <tbody id="topUsersBody">
+            </tbody>
+        </table>
+        <p id="noUsersData" style="display:none; text-align:center; color:var(--text-muted); padding:20px;">Нет данных</p>
     </div>
 </div>
 
-<!-- Monthly Activity Chart -->
-<div class="card">
-    <h3>Активность за 30 дней</h3>
-    <div class="chart-container">
-        <canvas id="monthlyActivityChart"></canvas>
-    </div>
-</div>
-
-<!-- Top Users -->
-<div class="card">
-    <h3>Топ пользователей</h3>
-    <table class="table">
-        <thead>
-            <tr>
-                <th>#</th>
-                <th>Пользователь</th>
-                <th>Количество работ</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for user in top_users %}
-            <tr>
-                <td>{{ loop.index }}</td>
-                <td>{{ user.name }} (@{{ user.username }})</td>
-                <td><strong>{{ user.count }}</strong></td>
-            </tr>
-            {% else %}
-            <tr>
-                <td colspan="3" class="text-center text-muted">Нет данных</td>
-            </tr>
+<!-- Контент: По сотрудникам -->
+<div id="tabEmployee" style="display:none;">
+    <div class="card" style="margin-bottom: 20px; display:flex; gap:15px; align-items:center; padding:15px;">
+        <label style="font-weight:bold;">Сотрудник:</label>
+        <select id="empSelect" class="input-large" style="flex:1;">
+            <option value="" disabled selected>-- Выберите сотрудника --</option>
+            {% for emp in employees %}
+            <option value="{{ emp.id }}">{{ emp.full_name }} ({{ emp.username }})</option>
             {% endfor %}
-        </tbody>
-    </table>
-</div>
+        </select>
+        
+        <label style="font-weight:bold; margin-left:10px;">Период:</label>
+        <select id="periodSelect" class="input-large">
+            <option value="today">Сегодня</option>
+            <option value="week">За неделю</option>
+            <option value="month">За месяц</option>
+            <option value="all" selected>За всё время</option>
+        </select>
+        
+        <button class="btn btn-primary" onclick="loadEmployeeStats()">Запросить отчёт</button>
+    </div>
 
+    <!-- Сводка сотрудника -->
+    <div id="empStatsContainer" style="display:none;">
+        <div class="stats-grid" style="grid-template-columns: 1fr 1fr 1fr; margin-bottom: 20px;">
+            <div class="stat-card" style="border-top: 3px solid var(--success);">
+                <div class="stat-info">
+                    <div class="stat-value" id="statEmpDone" style="color: var(--success);">0</div>
+                    <div class="stat-label">Выполнено этапов</div>
+                </div>
+            </div>
+            <div class="stat-card" style="border-top: 3px solid var(--error);">
+                <div class="stat-info">
+                    <div class="stat-value" id="statEmpDefect" style="color: var(--error);">0</div>
+                    <div class="stat-label">Обнаружено брака</div>
+                </div>
+            </div>
+            <div class="stat-card" style="border-top: 3px solid var(--info);">
+                <div class="stat-info">
+                    <div class="stat-value" id="statEmpScanIn" style="color: var(--info);">0</div>
+                    <div class="stat-label">Взято в работу (SCAN_IN)</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Таблица логов сотрудника -->
+        <div class="card">
+            <h3>Хронология действий (Логи)</h3>
+            <table class="table" style="margin-top:15px;">
+                <thead>
+                    <tr>
+                        <th>Время</th>
+                        <th>Действие</th>
+                        <th>SN устройства / Партномер</th>
+                        <th>Проект</th>
+                        <th>Рабочее место</th>
+                    </tr>
+                </thead>
+                <tbody id="empLogsBody">
+                </tbody>
+            </table>
+        </div>
+    </div>
+    
+    <div id="empEmptyState" style="text-align:center; padding:40px; color:var(--text-muted);">
+        Выберите сотрудника и нажмите "Запросить отчёт"
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
-    const deviceStatusData = {{ device_status | tojson }};
-    const weeklyWorkData = {{ weekly_work | tojson }};
+function switchTab(tabName) {
+    const isGen = tabName === 'general';
+    document.getElementById('tabGeneral').style.display = isGen ? 'block' : 'none';
+    document.getElementById('tabEmployee').style.display = isGen ? 'none' : 'block';
+    
+    const bgGen = document.getElementById('tabBtnGeneral');
+    const bgEmp = document.getElementById('tabBtnEmployee');
+    
+    bgGen.style.borderBottomColor = isGen ? 'var(--primary)' : 'transparent';
+    bgGen.style.color = isGen ? 'var(--primary)' : 'var(--text-muted)';
+    bgEmp.style.borderBottomColor = !isGen ? 'var(--primary)' : 'transparent';
+    bgEmp.style.color = !isGen ? 'var(--primary)' : 'var(--text-muted)';
+}
 
-    // График статусов устройств
-    const statusLabels = Object.keys(deviceStatusData);
-    const statusValues = Object.values(deviceStatusData);
+document.addEventListener('DOMContentLoaded', async () => {
+    try {
+        const resp = await fetch('/api/analytics/');
+        const data = await resp.json();
 
-    const ctx1 = document.getElementById('deviceStatusChart').getContext('2d');
-    new Chart(ctx1, {
-        type: 'pie',
-        data: {
-            labels: statusLabels,
-            datasets: [{
-                data: statusValues,
-                backgroundColor: [
-                    '#10b981', '#f59e0b', '#ef4444', '#6366f1',
-                    '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'
-                ]
-            }]
-        },
-        options: {
-            responsive: true,
-            plugins: {
-                legend: { position: 'bottom' }
-            }
-        }
-    });
-
-    // График активности за 30 дней
-    if (weeklyWorkData.length > 0) {
-        const ctx2 = document.getElementById('monthlyActivityChart').getContext('2d');
-        new Chart(ctx2, {
-            type: 'bar',
-            data: {
-                labels: weeklyWorkData.map(d => d.date),
-                datasets: [{
-                    label: 'Работ в день',
-                    data: weeklyWorkData.map(d => d.count),
-                    backgroundColor: '#4f46e5',
-                    borderRadius: 4,
-                }]
-            },
-            options: {
-                responsive: true,
-                plugins: {
-                    legend: { display: false }
+        const sKeys = Object.keys(data.device_status);
+        const sVals = Object.values(data.device_status);
+        if (sKeys.length > 0) {
+            new Chart(document.getElementById('deviceStatusChart').getContext('2d'), {
+                type: 'pie',
+                data: {
+                    labels: sKeys,
+                    datasets: [{
+                        data: sVals,
+                        backgroundColor: ['#10b981', '#f59e0b', '#ef4444', '#6366f1', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316']
+                    }]
                 },
-                scales: {
-                    y: { beginAtZero: true }
-                }
-            }
-        });
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right' } } }
+            });
+        } else {
+            document.getElementById('deviceStatusChart').style.display = 'none';
+            document.getElementById('noStatusData').style.display = 'block';
+        }
+
+        if (data.monthly_work.length > 0) {
+            new Chart(document.getElementById('monthlyActivityChart').getContext('2d'), {
+                type: 'bar',
+                data: {
+                    labels: data.monthly_work.map(d => d.date),
+                    datasets: [{
+                        label: 'Работ завершено',
+                        data: data.monthly_work.map(d => d.count),
+                        backgroundColor: '#4f46e5',
+                        borderRadius: 4,
+                    }]
+                },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+            });
+        } else {
+            document.getElementById('monthlyActivityChart').style.display = 'none';
+            document.getElementById('noTrendData').style.display = 'block';
+        }
+
+        const tbody = document.getElementById('topUsersBody');
+        if (data.top_users.length > 0) {
+            tbody.innerHTML = data.top_users.map((u, i) => `
+                <tr>
+                    <td>${i + 1}</td>
+                    <td>${u.name} <span class="text-muted">(@${u.username})</span></td>
+                    <td><strong style="color:var(--primary); font-size:16px;">${u.count}</strong></td>
+                </tr>
+            `).join('');
+            document.getElementById('topUsersTable').style.display = 'table';
+        } else {
+            document.getElementById('noUsersData').style.display = 'block';
+        }
+        
+    } catch (e) {
+        console.error('Failed to load analytics', e);
     }
+});
+
+async function loadEmployeeStats() {
+    const uid = document.getElementById('empSelect').value;
+    const p = document.getElementById('periodSelect').value;
+    if (!uid) return alert('Выберите сотрудника.');
+    
+    document.getElementById('empEmptyState').style.display = 'none';
+    document.getElementById('empStatsContainer').style.display = 'block';
+
+    try {
+        const resp = await fetch(`/api/analytics/employee?user_id=${uid}&period=${p}`);
+        const data = await resp.json();
+        
+        document.getElementById('statEmpDone').textContent = data.stats.completed;
+        document.getElementById('statEmpDefect').textContent = data.stats.defect;
+        document.getElementById('statEmpScanIn').textContent = data.stats.scan_in;
+        
+        const tbody = document.getElementById('empLogsBody');
+        if (data.history.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Нет активности</td></tr>';
+        } else {
+            tbody.innerHTML = data.history.map(row => {
+                let actColor = 'var(--text)';
+                if(row.action === 'Завершено') actColor = 'var(--success)';
+                if(row.action === 'Брак') actColor = 'var(--error)';
+                if(row.action === 'Взято в работу') actColor = 'var(--info)';
+                return `
+                <tr>
+                    <td style="white-space:nowrap;">${row.created_at}</td>
+                    <td style="color:${actColor}; font-weight:bold;">${row.action}</td>
+                    <td><code>${row.sn}</code></td>
+                    <td>${row.project}</td>
+                    <td>${row.workplace}</td>
+                </tr>`;
+            }).join('');
+        }
+    } catch (e) {
+        alert('Ошибка загрузки: ' + e.message);
+    }
+}
 </script>
 {% endblock %}
