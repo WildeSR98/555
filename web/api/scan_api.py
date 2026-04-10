@@ -32,7 +32,7 @@ class ProcessBatchRequest(BaseModel):
     workplace_id: int
     worker_id: int
     serial_numbers: List[str]
-
+    verified_project_ids: Optional[List[int]] = []
 
 class ActionRequest(BaseModel):
     session_id: int
@@ -113,81 +113,107 @@ async def start_session(data: StartSessionRequest, db: Session = Depends(get_db)
 @router.post("/process-batch")
 async def process_batch(data: ProcessBatchRequest, db: Session = Depends(get_db)):
     """Шаг 2: Обработка пакета SN — валидация и приём в работу."""
-    workplace = db.query(Workplace).get(data.workplace_id)
-    if not workplace:
-        raise HTTPException(404, 'Рабочее место не найдено')
+    try:
+        workplace = db.query(Workplace).get(data.workplace_id)
+        if not workplace:
+            raise HTTPException(404, 'Рабочее место не найдено')
 
-    worker = db.query(User).get(data.worker_id)
-    if not worker:
-        raise HTTPException(404, 'Работник не найден')
+        worker = db.query(User).get(data.worker_id)
+        if not worker:
+            raise HTTPException(404, 'Работник не найден')
 
-    valid_devices = []
-    to_scan_in = []
-    already_in = []
+        valid_devices = []
+        to_scan_in = []
+        already_in = []
 
-    for sn in data.serial_numbers:
-        device = db.query(Device).filter(Device.serial_number == sn).first()
-        if not device:
-            raise HTTPException(400, f'Устройство SN "{sn}" не найдено')
+        for sn in data.serial_numbers:
+            device = db.query(Device).filter(Device.serial_number == sn).first()
+            if not device:
+                return {
+                    "ok": False,
+                    "error": f'Устройство SN "{sn}" не найдено'
+                }
 
-        if hasattr(device, 'is_semifinished') and device.is_semifinished:
-            if hasattr(workplace, 'accepts_semifinished') and not workplace.accepts_semifinished:
-                raise HTTPException(400, f'{sn}: Стенд не принимает полуфабрикаты')
+            if hasattr(device, 'is_semifinished') and device.is_semifinished:
+                if hasattr(workplace, 'accepts_semifinished') and not workplace.accepts_semifinished:
+                    return {
+                        "ok": False,
+                        "error": f'{sn}: Стенд не принимает полуфабрикаты'
+                    }
 
-        if hasattr(workplace, 'restrict_same_worker') and workplace.restrict_same_worker:
-            last_log = db.query(WorkLog).filter(
-                WorkLog.device_id == device.id,
-                WorkLog.action == 'COMPLETED'
-            ).order_by(WorkLog.created_at.desc()).first()
-            if last_log and last_log.worker_id == data.worker_id:
-                raise HTTPException(400, f'{sn}: Вы выполняли предыдущий этап. Запрет подряд.')
+            if hasattr(workplace, 'restrict_same_worker') and workplace.restrict_same_worker:
+                last_log = db.query(WorkLog).filter(
+                    WorkLog.device_id == device.id,
+                    WorkLog.action == 'COMPLETED'
+                ).order_by(WorkLog.created_at.desc()).first()
+                if last_log and last_log.worker_id == data.worker_id:
+                    return {
+                        "ok": False,
+                        "error": f'{sn}: Вы выполняли предыдущий этап. Запрет подряд.'
+                    }
 
-        valid_devices.append(device)
+            # Проверка спецификации (спеки)
+            if device.project and device.project.spec_link and device.project.spec_code:
+                if device.project.id not in (data.verified_project_ids or []):
+                    return {
+                        "ok": False,
+                        "require_spec": True,
+                        "project_id": device.project.id,
+                        "spec_link": device.project.spec_link,
+                        "spec_code": device.project.spec_code
+                    }
 
-        # Определяем: нужно принять в работу или уже на этом этапе
-        if device.status.startswith('WAITING_') or device.status != workplace.workplace_type:
-            to_scan_in.append(device)
-        else:
-            already_in.append(device)
+            valid_devices.append(device)
 
-    # Если есть устройства для приёма в работу — делаем SCAN_IN
-    scan_in_results = []
-    if to_scan_in:
-        for device in to_scan_in:
-            old_status = device.status
-            device.status = workplace.workplace_type
-            device.current_worker_id = data.worker_id
-            device.updated_at = datetime.now()
+            # Определяем: нужно принять в работу или уже на этом этапе
+            # Если статус None, считаем что нужно принять в работу
+            status = device.status or ""
+            if status.startswith('WAITING_') or status != workplace.workplace_type:
+                to_scan_in.append(device)
+            else:
+                already_in.append(device)
 
-            log = WorkLog(
-                worker_id=data.worker_id,
-                session_id=data.session_id,
-                workplace_id=data.workplace_id,
-                device_id=device.id,
-                project_id=device.project_id,
-                action='SCAN_IN',
-                old_status=old_status,
-                new_status=device.status,
-                part_number=device.part_number or '',
-                serial_number=device.serial_number or '',
-                created_at=datetime.now(),
-            )
-            db.add(log)
-            scan_in_results.append({"sn": device.serial_number, "action": "SCAN_IN"})
-        db.commit()
+        # Если есть устройства для приёма в работу — делаем SCAN_IN
+        scan_in_results = []
+        if to_scan_in:
+            for device in to_scan_in:
+                old_status = device.status
+                device.status = workplace.workplace_type
+                device.current_worker_id = data.worker_id
+                device.updated_at = datetime.now()
 
-    return {
-        "ok": True,
-        "scan_in_count": len(to_scan_in),
-        "already_in_count": len(already_in),
-        "scan_in_results": scan_in_results,
-        "device_ids": [d.id for d in valid_devices],
-        "devices": [
-            {"id": d.id, "sn": d.serial_number, "name": d.name, "status": d.status}
-            for d in valid_devices
-        ],
-        "need_action": len(already_in) > 0,
-    }
+                log = WorkLog(
+                    worker_id=data.worker_id,
+                    session_id=data.session_id,
+                    workplace_id=data.workplace_id,
+                    device_id=device.id,
+                    project_id=device.project_id,
+                    action='SCAN_IN',
+                    old_status=old_status,
+                    new_status=device.status,
+                    part_number=device.part_number or '',
+                    serial_number=device.serial_number or '',
+                    created_at=datetime.now(),
+                )
+                db.add(log)
+                scan_in_results.append({"sn": device.serial_number, "action": "SCAN_IN"})
+            db.commit()
+
+        return {
+            "ok": True,
+            "scan_in_count": len(to_scan_in),
+            "already_in_count": len(already_in),
+            "scan_in_results": scan_in_results,
+            "device_ids": [d.id for d in valid_devices],
+            "devices": [
+                {"id": d.id, "sn": d.serial_number, "name": d.name, "status": d.status}
+                for d in valid_devices
+            ],
+            "need_action": len(already_in) > 0,
+        }
+    except Exception as e:
+        # Ловим все ошибки и отдаем как 400 чтобы фронт показал текст ошибки
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.post("/action")
@@ -208,62 +234,75 @@ async def do_action(data: ActionRequest, db: Session = Depends(get_db)):
         'WAREHOUSE': 'QC_PASSED',
     }
 
-    results = []
-    for device_id in data.device_ids:
-        device = db.query(Device).get(device_id)
-        if not device:
-            continue
+    try:
+        results = []
+        action_type = data.action
 
-        old_status = device.status
+        for device_id in data.device_ids:
+            device = db.query(Device).filter(Device.id == device_id).first()
+            if not device:
+                continue
 
-        if data.action == 'complete':
-            new_status = STATUS_MAP.get(old_status, 'QC_PASSED')
-            device.status = new_status
-            device.current_worker_id = None
-            action_type = 'COMPLETED'
-        elif data.action == 'defect':
-            device.status = 'DEFECT'
-            device.current_worker_id = None
-            action_type = 'DEFECT'
-        elif data.action == 'keep':
-            action_type = 'KEPT'
-        elif data.action == 'semifinished':
-            device.is_semifinished = True
-            device.current_worker_id = None
-            action_type = 'MAKE_SEMIFINISHED'
-        else:
-            continue
+            old_status = device.status
 
-        log = WorkLog(
-            worker_id=data.worker_id,
-            session_id=data.session_id,
-            workplace_id=data.workplace_id,
-            device_id=device.id,
-            project_id=device.project_id,
-            action=action_type,
-            old_status=old_status,
-            new_status=device.status,
-            part_number=device.part_number or '',
-            serial_number=device.serial_number or '',
-            created_at=datetime.now(),
-        )
-        db.add(log)
-        results.append({"sn": device.serial_number, "action": action_type})
+            if data.action == 'complete':
+                new_status = STATUS_MAP.get(old_status, 'QC_PASSED')
+                device.status = new_status
+                device.current_worker_id = None
+                device.updated_at = datetime.now()
+                action_type = 'COMPLETED'
+            elif data.action == 'defect':
+                device.status = 'DEFECT'
+                device.current_worker_id = None
+                device.updated_at = datetime.now()
+                action_type = 'DEFECT'
+            elif data.action == 'keep':
+                action_type = 'KEPT'
+            elif data.action == 'semifinished':
+                device.is_semifinished = True
+                device.current_worker_id = None
+                device.updated_at = datetime.now()
+                action_type = 'MAKE_SEMIFINISHED'
+            else:
+                continue
 
-    db.commit()
+            log = WorkLog(
+                worker_id=data.worker_id,
+                session_id=data.session_id,
+                workplace_id=data.workplace_id,
+                device_id=device.id,
+                project_id=device.project_id,
+                action=action_type,
+                old_status=old_status,
+                new_status=device.status,
+                part_number=device.part_number or '',
+                serial_number=device.serial_number or '',
+                created_at=datetime.now(),
+            )
+            db.add(log)
+            results.append({"sn": device.serial_number, "action": action_type})
 
-    ACTION_DISPLAYS = {
-        'COMPLETED': '✅ Готово',
-        'DEFECT': '⚠️ Брак',
-        'KEPT': '📌 Оставлено',
-        'MAKE_SEMIFINISHED': '🔧 Полуфабрикат',
-    }
+        db.commit()
 
-    return {
-        "ok": True,
-        "message": f'{ACTION_DISPLAYS.get(action_type, data.action)} — {len(results)} устр.',
-        "results": results,
-    }
+        ACTION_DISPLAYS = {
+            'COMPLETED': '✅ Готово',
+            'DEFECT': '⚠️ Брак',
+            'KEPT': '📌 Оставлено',
+            'MAKE_SEMIFINISHED': '🔧 Полуфабрикат',
+            'SCAN_IN': '📥 Принят'
+        }
+
+        return {
+            "ok": True,
+            "message": f'{ACTION_DISPLAYS.get(action_type, data.action)} — {len(results)} устр.',
+            "results": results,
+        }
+
+    except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
+        print(f"[do_action ERROR] {tb}")
+        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {str(e)}")
 
 
 @router.post("/end-session")

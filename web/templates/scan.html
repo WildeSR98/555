@@ -106,6 +106,29 @@
     .mt-4 { margin-top: 1.5rem; }
     .sn-item { font-family: monospace; font-size: 14px; }
 </style>
+
+<!-- Модалка: Проверка спецификации (Спека) -->
+<div id="specModal" class="modal-overlay" style="display:none;">
+    <div class="modal-card">
+        <h3>📄 Проверка спецификации</h3>
+        <p class="text-muted" style="margin-bottom: 20px;">Для этого проекта требуется ознакомиться со спецификацией и ввести проверочный код.</p>
+        
+        <div style="margin-bottom: 20px;">
+            <button id="btnOpenSpec" class="btn btn-primary btn-block" style="background:#4f46e5;">🔗 Открыть спецификацию</button>
+            <p style="font-size: 11px; color: var(--text-muted); margin-top: 5px; text-align: center;">(откроется в новой вкладке)</p>
+        </div>
+
+        <div class="form-group">
+            <label>Введите проверочный код:</label>
+            <input type="text" id="specCodeInput" class="input-large" placeholder="Код из спецификации..." autocomplete="off">
+        </div>
+
+        <div class="modal-buttons">
+            <button type="button" class="btn" style="background:var(--border);" onclick="closeSpecModal()">Отмена</button>
+            <button type="button" class="btn btn-success" onclick="verifySpecCode()">✅ Подтвердить</button>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
@@ -116,6 +139,9 @@ let state = {
     workplaceId: null,
     batchLimit: 1,
     devices: [], // {id, sn, name, status}
+    verifiedProjectIds: [], // Список ID проектов, которые прошли проверку в этой сессии
+    pendingScan: null, // Храним SN, который вызвал проверку
+    pendingProjectData: null, // Храним данные проекта для проверки
 };
 
 document.addEventListener('DOMContentLoaded', loadWorkplaces);
@@ -217,12 +243,21 @@ async function processScan(e) {
                 session_id: state.sessionId,
                 workplace_id: state.workplaceId,
                 worker_id: state.workerId,
-                serial_numbers: [sn]
+                serial_numbers: [sn],
+                verified_project_ids: state.verifiedProjectIds
             })
         });
-        const res = await resp.json();
         
         if (resp.ok) {
+            const res = await resp.json();
+            if (res.require_spec) {
+                // Требуется проверка спеки
+                state.pendingScan = sn;
+                state.pendingProjectData = res;
+                openSpecModal(res.spec_link);
+                return;
+            }
+
             // Если устройство только взято в работу, не добавляем в буфер
             if (res.need_action) {
                 const dev = res.devices[0]; // TODO: handle multiple if bulk
@@ -238,7 +273,8 @@ async function processScan(e) {
                 showToast(`Взято в работу и добавлено в буфер: ${sn}`, 'success');
             }
         } else {
-            showFeedback('error', res.detail || 'Ошибка');
+            const err = await resp.text();
+            showFeedback('error', `Ошибка ${resp.status}: ${err || 'Неизвестная ошибка'}`);
         }
     } catch (e) {
         showFeedback('error', 'Ошибка сети: ' + e.message);
@@ -310,19 +346,61 @@ async function doAction(actionName) {
                 action: actionName
             })
         });
-        const res = await resp.json();
         
         if (resp.ok) {
+            const res = await resp.json();
             // Удаляем обработанные из стейта
             state.devices = state.devices.filter(d => !selectedIds.includes(d.id));
             renderDevices();
             showFeedback('success', res.message);
             document.getElementById('snInput').focus();
         } else {
-            showFeedback('error', res.detail || 'Ошибка при сохранении');
+            const err = await resp.text();
+            showFeedback('error', `Ошибка ${resp.status}: ${err || 'Ошибка при сохранении'}`);
         }
     } catch (e) {
         alert('Ошибка сети: ' + e.message);
+    }
+}
+
+// Функции для модалки Спецификации
+function openSpecModal(link) {
+    document.getElementById('specModal').style.display = 'flex';
+    document.getElementById('specCodeInput').value = '';
+    document.getElementById('specCodeInput').focus();
+    
+    document.getElementById('btnOpenSpec').onclick = () => {
+        window.open(link, '_blank');
+    };
+}
+
+function closeSpecModal() {
+    document.getElementById('specModal').style.display = 'none';
+    state.pendingScan = null;
+    state.pendingProjectData = null;
+    document.getElementById('snInput').focus();
+}
+
+function verifySpecCode() {
+    const inputCode = document.getElementById('specCodeInput').value.trim();
+    if (!inputCode) return;
+
+    if (inputCode === state.pendingProjectData.spec_code) {
+        // Код верный
+        state.verifiedProjectIds.push(state.pendingProjectData.project_id);
+        const snToRetry = state.pendingScan;
+        
+        document.getElementById('specModal').style.display = 'none';
+        state.pendingProjectData = null;
+        state.pendingScan = null;
+        
+        // Повторяем сканирование с уже заполненным списком верифицированных проектов
+        document.getElementById('snInput').value = snToRetry;
+        processScan({ preventDefault: () => {} });
+    } else {
+        alert('Неверный проверочный код! Пожалуйста, проверьте спецификацию.');
+        document.getElementById('specCodeInput').value = '';
+        document.getElementById('specCodeInput').focus();
     }
 }
 </script>
