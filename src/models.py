@@ -159,7 +159,7 @@ class Project(Base):
     code = Column(String(20), unique=True)
     name = Column(String(200), nullable=False)
     description = Column(Text, default='')
-    status = Column(String(20), default='PLANNING')
+    status = Column(String(50), default='PLANNING')
     manager_id = Column(Integer, ForeignKey('accounts_user.id'), nullable=True)
     created_at = Column(DateTime)
     updated_at = Column(DateTime)
@@ -438,12 +438,12 @@ class Workplace(Base):
 
     id = Column(Integer, primary_key=True)
     name = Column(String(100), nullable=False)
-    workplace_type = Column(String(25), nullable=False)
+    workplace_type = Column(String(50), nullable=False)
     is_pool = Column(Boolean, default=False)
     pool_limit = Column(Integer, default=0)
     accepts_semifinished = Column(Boolean, default=False)
     restrict_same_worker = Column(Boolean, default=False)
-    device_status_on_enter = Column(String(20), default='')
+    device_status_on_enter = Column(String(50), default='')
     order = Column(Integer, default=0)
     is_active = Column(Boolean, default=True)
 
