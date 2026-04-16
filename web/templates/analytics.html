@@ -192,7 +192,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             tbody.innerHTML = data.top_users.map((u, i) => `
                 <tr>
                     <td>${i + 1}</td>
-                    <td>${u.name} <span class="text-muted">(@${u.username})</span></td>
+                    <td>${escapeHTML(u.name)} <span class="text-muted">(@${escapeHTML(u.username)})</span></td>
                     <td><strong style="color:var(--primary); font-size:16px;">${u.count}</strong></td>
                 </tr>
             `).join('');
@@ -233,11 +233,11 @@ async function loadEmployeeStats() {
                 if(row.action === 'Взято в работу') actColor = 'var(--info)';
                 return `
                 <tr>
-                    <td style="white-space:nowrap;">${row.created_at}</td>
-                    <td style="color:${actColor}; font-weight:bold;">${row.action}</td>
-                    <td><code>${row.sn}</code></td>
-                    <td>${row.project}</td>
-                    <td>${row.workplace}</td>
+                    <td style="white-space:nowrap;">${escapeHTML(row.created_at)}</td>
+                    <td style="color:${actColor}; font-weight:bold;">${escapeHTML(row.action)}</td>
+                    <td><code>${escapeHTML(row.sn)}</code></td>
+                    <td>${escapeHTML(row.project)}</td>
+                    <td>${escapeHTML(row.workplace)}</td>
                 </tr>`;
             }).join('');
         }

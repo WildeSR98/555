@@ -59,6 +59,8 @@ class AppConfig:
     app_name: str = 'Production Manager'
     app_version: str = '1.0.0'
     debug: bool = False
+    secret_key: str = 'development-default-key'
+    csrf_secret: str = 'csrf-development-default-key'
     db: DatabaseConfig = field(default_factory=DatabaseConfig)
 
     @classmethod
@@ -76,6 +78,8 @@ class AppConfig:
         )
         return cls(
             debug=os.getenv('DEBUG', 'False').lower() in ('true', '1', 'yes'),
+            secret_key=os.getenv('SECRET_KEY', 'development-default-key'),
+            csrf_secret=os.getenv('CSRF_SECRET', os.getenv('SECRET_KEY', 'csrf-development-default-key')),
             db=db_config,
         )
 

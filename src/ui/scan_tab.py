@@ -344,7 +344,7 @@ class ScanTab(QWidget):
                     self.batch_list.addItem(f"✅ {s}")
 
             self.sn_status.setText(f'В партии: {len(self.scanned_sns)}')
-            self.sn_status.setStyleSheet(f'color: {COLORS["text"]};')
+            self.sn_status.setStyleSheet(f'color: {COLORS["text_primary"]};')
         except Exception as e:
             print("Ошибка добавления:", e)
 

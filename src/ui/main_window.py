@@ -56,7 +56,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(AnalyticsTab(self.user), '📊  Аналитика')
 
         self.admin_tab_index = -1
-        if self.user.role in ['ADMIN', 'MANAGER'] or self.user.is_superuser:
+        if self.user.role in [User.ROLE_ADMIN, User.ROLE_MANAGER, User.ROLE_SHOP_MANAGER] or self.user.is_superuser:
             self.admin_tab_index = self.tabs.addTab(AdminPanelTab(self.user), '⚙️ Управление персоналом')
 
         # Обработчик смены вкладок: защита админ-панели

@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token }}">
     <title>{% block title %}Production Manager{% endblock %}</title>
     
     <!-- Chart.js -->
@@ -38,6 +39,10 @@
         </ul>
         
         <div class="sidebar-footer">
+            <div id="health-indicator" style="font-size: 11px; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 4px; background: rgba(0,0,0,0.15); color: rgba(255,255,255,0.7);">
+                <span id="health-dot" style="width: 8px; height: 8px; border-radius: 50%; background: #94a3b8;"></span>
+                <span id="health-text">Система: проверка...</span>
+            </div>
             <div class="user-info">
                 <div class="user-name">{{ user.full_name or user.username }}</div>
                 <div class="user-role">{{ user.role_display }}</div>
@@ -55,6 +60,7 @@
     {% endif %}
     
     <!-- Custom JS -->
+    <script src="/static/js/utils.js"></script>
     <script src="/static/js/main.js"></script>
     {% block extra_js %}{% endblock %}
 </body>

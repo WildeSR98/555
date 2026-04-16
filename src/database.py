@@ -8,6 +8,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import QueuePool, StaticPool
 from typing import Optional
+from contextlib import contextmanager
 
 from .config import config
 
@@ -30,6 +31,7 @@ def _create_engine():
             pool_size=config.db.pool_min,
             max_overflow=config.db.pool_max - config.db.pool_min,
             pool_pre_ping=True,
+            pool_recycle=3600,
             pool_timeout=config.db.connect_timeout,
             echo=config.debug,
         )
@@ -43,6 +45,20 @@ SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False, expi
 def get_session() -> Session:
     """Получить новую сессию БД (для десктопного приложения)."""
     return SessionLocal()
+
+
+@contextmanager
+def session_scope():
+    """Контекстный менеджер для работы с сессией БД (с commit/rollback)."""
+    session = SessionLocal()
+    try:
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
 
 
 def get_db():

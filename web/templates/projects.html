@@ -125,7 +125,7 @@ let currentProjectId = null;
 
 const deviceModels = [
     {% for dm in device_models %}
-    { id: {{ dm.id }}, name: "{{ dm.category }} — {{ dm.name }}" },
+    { id: {{ dm.id }}, category: "{{ dm.category }}", name: "{{ dm.name }}" },
     {% endfor %}
 ];
 
@@ -168,9 +168,9 @@ function renderTree(filterText = '') {
             d.children.forEach(op => {
                 ccHTML += `
                     <tr class="tree-row tree-child2 child-of-${p.id}" style="${ft ? '' : 'display:none;'}" onclick="loadDetails('operation', ${op.id})">
-                        <td style="padding-left: 50px;">⚙ ${op.name}</td>
-                        <td>${op.code || ''}</td>
-                        <td><span class="badge-color" style="background:${op.badge_color}">${op.status_display}</span></td>
+                        <td style="padding-left: 50px;">⚙ ${escapeHTML(op.name)}</td>
+                        <td>${escapeHTML(op.code || '')}</td>
+                        <td><span class="badge-color" style="background:${escapeHTML(op.badge_color)}">${escapeHTML(op.status_display)}</span></td>
                         <td></td>
                     </tr>
                 `;
@@ -180,10 +180,10 @@ function renderTree(filterText = '') {
                 hasMatchChildren = true;
                 cHTML += `
                     <tr class="tree-row tree-child1 child-of-${p.id}" style="${ft ? '' : 'display:none;'}" onclick="loadDetails('device', ${d.id})">
-                        <td style="padding-left: 25px;">💻 ${d.name}</td>
-                        <td>${d.code || ''}</td>
-                        <td><span class="badge-color" style="background:${d.badge_color}">${d.status_display}</span></td>
-                        <td><code>${d.sn_pn}</code></td>
+                        <td style="padding-left: 25px;">💻 ${escapeHTML(d.name)}</td>
+                        <td>${escapeHTML(d.code || '')}</td>
+                        <td><span class="badge-color" style="background:${escapeHTML(d.badge_color)}">${escapeHTML(d.status_display)}</span></td>
+                        <td><code>${escapeHTML(d.sn_pn)}</code></td>
                     </tr>
                 ` + ccHTML;
             }
@@ -198,10 +198,10 @@ function renderTree(filterText = '') {
             tr.innerHTML = `
                 <td>
                     <button type="button" class="btn-toggle" onclick="toggleProject(${p.id}, event)" style="background:none; border:none; cursor:pointer; width:20px; font-weight:bold;">${isExpanded ? '▼' : '▶'}</button>
-                    <span onclick="loadDetails('project', ${p.id})">📁 ${p.name}</span>
+                    <span onclick="loadDetails('project', ${p.id})">📁 ${escapeHTML(p.name)}</span>
                 </td>
-                <td onclick="loadDetails('project', ${p.id})">${p.code || ''}</td>
-                <td onclick="loadDetails('project', ${p.id})"><span class="badge-color" style="background:${p.badge_color}">${p.status_display}</span></td>
+                <td onclick="loadDetails('project', ${p.id})">${escapeHTML(p.code || '')}</td>
+                <td onclick="loadDetails('project', ${p.id})"><span class="badge-color" style="background:${escapeHTML(p.badge_color)}">${escapeHTML(p.status_display)}</span></td>
                 <td onclick="loadDetails('project', ${p.id})"></td>
             `;
             tbody.appendChild(tr);
@@ -243,7 +243,7 @@ async function loadDetails(type, id) {
         document.getElementById('detailsTable').style.display = 'table';
         
         const tbody = document.getElementById('detailsBody');
-        tbody.innerHTML = data.fields.map(f => `<tr><td style="font-weight:600;width:40%;">${f.label}</td><td>${f.value}</td></tr>`).join('');
+        tbody.innerHTML = data.fields.map(f => `<tr><td style="font-weight:600;width:40%;">${escapeHTML(f.label)}</td><td>${escapeHTML(f.value)}</td></tr>`).join('');
         
         const pStats = document.getElementById('projectStats');
         if (type === 'project' && data.stats) {
@@ -262,12 +262,20 @@ async function loadDetails(type, id) {
 
 async function deleteProject() {
     if (!currentProjectId) return;
-    if (!confirm('Вы уверены, что хотите удалить проект и ВСЕ его устройства?')) return;
+    if (!confirm('ВНИМАНИЕ! Вы собираетесь удалить проект и ВСЕ связанные с ним устройства, серийные номера и журналы работ.\nЭто действие необратимо.')) return;
     
+    const password = prompt("Для подтверждения удаления введите пароль администратора:");
+    if (!password) return;
+
     try {
-        const resp = await fetch(`/api/projects/${currentProjectId}`, {method: 'DELETE'});
+        const resp = await fetch(`/api/projects/${currentProjectId}/delete`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ password: password })
+        });
+        
         if(resp.ok) {
-            alert('Удалено');
+            alert('Проект и все связанные данные успешно удалены');
             document.getElementById('detailsTable').style.display = 'none';
             document.getElementById('detailsTitle').textContent = 'Выберите элемент';
             document.getElementById('btnDelete').style.display = 'none';
@@ -275,10 +283,10 @@ async function deleteProject() {
             loadTree();
         } else {
             const r = await resp.json();
-            alert(r.detail || 'Ошибка');
+            alert(r.detail || 'Ошибка при удалении');
         }
     } catch (e) {
-        alert(e);
+        alert('Ошибка сети: ' + e.message);
     }
 }
 
@@ -299,18 +307,32 @@ function addDeviceRow() {
     const row = document.createElement('div');
     row.className = 'dev-row';
     
-    let opts = '<option value="" disabled selected>-- Выберите модель --</option>';
-    deviceModels.forEach(m => {
-        opts += `<option value="${m.id}">${m.name}</option>`;
+    // Генерируем уникальные категории
+    const categories = [...new Set(deviceModels.map(m => m.category))];
+    
+    let catOpts = '<option value="" disabled selected>-- Устройство --</option>';
+    categories.forEach(c => {
+        catOpts += `<option value="${c}">${c}</option>`;
     });
 
     row.innerHTML = `
         <input type="text" class="dev-pn" placeholder="PN..." required>
-        <select class="dev-model" required>${opts}</select>
+        <select class="dev-category" onchange="updateModels(this)" required>${catOpts}</select>
+        <select class="dev-model" required><option value="" disabled selected>-- Производитель --</option></select>
         <input type="number" class="dev-qty" value="1" min="1" max="1000" required>
         <button type="button" class="btn btn-danger" onclick="this.parentElement.remove()">❌</button>
     `;
     container.appendChild(row);
+}
+
+function updateModels(categorySelect) {
+    const category = categorySelect.value;
+    const modelSelect = categorySelect.parentElement.querySelector('.dev-model');
+    modelSelect.innerHTML = '<option value="" disabled selected>-- Производитель --</option>';
+    
+    deviceModels.filter(m => m.category === category).forEach(m => {
+        modelSelect.innerHTML += `<option value="${m.id}">${m.name}</option>`;
+    });
 }
 
 async function submitCreate(e) {

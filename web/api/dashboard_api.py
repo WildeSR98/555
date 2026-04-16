@@ -14,7 +14,7 @@ router = APIRouter()
 
 
 @router.get("/")
-async def get_dashboard_stats(db: Session = Depends(get_db)):
+def get_dashboard_stats(db: Session = Depends(get_db)):
     """Получить статистику дашборда."""
     total_workplaces = db.query(Workplace).count()
     active_sessions = db.query(WorkSession).filter_by(is_active=True).count()
@@ -23,8 +23,12 @@ async def get_dashboard_stats(db: Session = Depends(get_db)):
     # Статистика по статусам устройств
     device_status = db.query(Device.status, func.count(Device.id)).group_by(Device.status).all()
     
-    # Последние работы
-    recent_worklogs = db.query(WorkLog).order_by(WorkLog.created_at.desc()).limit(10).all()
+    # Последние работы (с eager loading worker и device)
+    from sqlalchemy.orm import joinedload
+    recent_worklogs = db.query(WorkLog).options(
+        joinedload(WorkLog.worker),
+        joinedload(WorkLog.device)
+    ).order_by(WorkLog.created_at.desc()).limit(10).all()
     
     return {
         "total_workplaces": total_workplaces,
@@ -34,8 +38,8 @@ async def get_dashboard_stats(db: Session = Depends(get_db)):
         "recent_worklogs": [
             {
                 "id": wl.id,
-                "user": wl.worker.full_name if wl.worker else None,
-                "device": wl.device.serial_number if wl.device else None,
+                "user": wl.worker.full_name if wl.worker else (f"User #{wl.worker_id}" if wl.worker_id else None),
+                "device": wl.device.serial_number if wl.device else (f"Device #{wl.device_id}" if wl.device_id else None),
                 "action": wl.action,
                 "created_at": wl.created_at.isoformat() if wl.created_at else None,
             }
@@ -45,7 +49,7 @@ async def get_dashboard_stats(db: Session = Depends(get_db)):
 
 
 @router.get("/chart-data")
-async def get_chart_data(db: Session = Depends(get_db)):
+def get_chart_data(db: Session = Depends(get_db)):
     """Данные для графиков дашборда."""
     # Активность за последние 7 дней
     week_ago = datetime.now() - timedelta(days=7)

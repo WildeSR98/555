@@ -4,14 +4,15 @@ API эндпоинты для Projects.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import desc
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime
 
 from src.database import get_db
-from src.models import Project, Device, Operation, SerialNumber, DeviceModel
+from src.models import Project, Device, Operation, SerialNumber, DeviceModel, User, WorkLog
+from web.dependencies import get_current_user
 
 router = APIRouter()
 
@@ -31,14 +32,21 @@ class ProjectCreateRequest(BaseModel):
     devices: List[DeviceRowInput]
 
 
+class DeleteProjectRequest(BaseModel):
+    password: str
+
+
 @router.get("/tree")
-async def get_projects_tree(status: Optional[str] = None, db: Session = Depends(get_db)):
-    """Получить дерево проектов -> устройств -> операций."""
+def get_projects_tree(status: Optional[str] = None, db: Session = Depends(get_db)):
+    """Получить дерево проектов -> устройств -> операций (Оптимизировано)."""
     query = db.query(Project)
     if status:
         query = query.filter(Project.status == status)
     
-    projects = query.order_by(Project.created_at.desc()).all()
+    # Используем selectinload для одного дополнительного запроса на каждый уровень вложенности вместо N+1
+    projects = query.options(
+        selectinload(Project.devices).selectinload(Device.operations)
+    ).order_by(Project.created_at.desc()).all()
     
     tree = []
     for p in projects:
@@ -53,9 +61,7 @@ async def get_projects_tree(status: Optional[str] = None, db: Session = Depends(
             "children": []
         }
         
-        # Получаем устройства
-        devices = db.query(Device).filter(Device.project_id == p.id).order_by(Device.name).all()
-        for d in devices:
+        for d in p.devices:
             d_node = {
                 "id": d.id,
                 "type": "device",
@@ -68,9 +74,7 @@ async def get_projects_tree(status: Optional[str] = None, db: Session = Depends(
                 "children": []
             }
             
-            # Получаем операции
-            ops = db.query(Operation).filter(Operation.device_id == d.id).order_by(Operation.id).all()
-            for op in ops:
+            for op in d.operations:
                 op_node = {
                     "id": op.id,
                     "type": "operation",
@@ -90,17 +94,19 @@ async def get_projects_tree(status: Optional[str] = None, db: Session = Depends(
 
 
 @router.get("/{entity_type}/{entity_id}")
-async def get_entity_details(entity_type: str, entity_id: int, db: Session = Depends(get_db)):
+def get_entity_details(entity_type: str, entity_id: int, db: Session = Depends(get_db)):
     """Получить детали для панели справа."""
     if entity_type == 'project':
         project = db.query(Project).get(entity_id)
         if not project:
             raise HTTPException(404, "Project not found")
         
-        # Считаем статистику
-        total = project.devices.count()
-        done = db.query(Device).filter(Device.project_id == entity_id, Device.status.in_(['QC_PASSED', 'SHIPPED'])).count()
-        not_started = db.query(Device).filter(Device.project_id == entity_id, Device.status.in_(['PLANNING', 'WAITING_KITTING'])).count()
+        # Считаем статистику (теперь через len(project.devices), так как это список)
+        devices_list = project.devices
+        total = len(devices_list)
+        
+        done = sum(1 for d in devices_list if d.status in (['QC_PASSED', 'SHIPPED']))
+        not_started = sum(1 for d in devices_list if d.status in (['PLANNING', 'WAITING_KITTING']))
         in_work = total - done - not_started
         
         return {
@@ -157,8 +163,14 @@ async def get_entity_details(entity_type: str, entity_id: int, db: Session = Dep
 
 
 @router.post("/")
-async def create_project(data: ProjectCreateRequest, db: Session = Depends(get_db)):
+async def create_project(
+    data: ProjectCreateRequest, 
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
     """Создать проект с автоматической генерацией SN."""
+    if user.role not in (User.ROLE_ADMIN, User.ROLE_MANAGER, User.ROLE_SHOP_MANAGER):
+        raise HTTPException(403, "У вас недостаточно прав для создания проекта")
     if not data.name:
         raise HTTPException(400, "Название проекта не может быть пустым")
         
@@ -239,15 +251,39 @@ async def create_project(data: ProjectCreateRequest, db: Session = Depends(get_d
         raise HTTPException(500, str(e))
 
 
-@router.delete("/{project_id}")
-async def delete_project(project_id: int, db: Session = Depends(get_db)):
-    """Удалить проект."""
+@router.post("/{project_id}/delete")
+async def delete_project(
+    project_id: int, 
+    data: DeleteProjectRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
+    """Удалить проект с проверкой пароля администратора."""
+    if user.role not in (User.ROLE_ADMIN, User.ROLE_SHOP_MANAGER):
+        raise HTTPException(403, "Только администратор или начальник цеха могут удалять проекты")
+        
+    if not user.check_password(data.password):
+        raise HTTPException(401, "Неверный пароль администратора")
+
     project = db.query(Project).get(project_id)
     if not project:
         raise HTTPException(404, "Project not found")
+
+    try:
+        # Manually delete all worklogs for devices in this project before deleting project
+        db.query(WorkLog).filter(WorkLog.project_id == project_id).delete(synchronize_session=False)
         
-    # Связанные устройства, операции и SN удаляться cascade, 
-    # если ORM настроен верно. В данной системе обычно просто db.delete()
-    db.delete(project)
-    db.commit()
-    return {"ok": True, "message": "Проект удален"}
+        # Clear device ID references in serial numbers so they aren't deleted/failed on cascade
+        db.execute(SerialNumber.__table__.update().where(
+            SerialNumber.device_id.in_(
+                [d.id for d in project.devices]
+            )
+        ).values(device_id=None, is_used=False))
+        
+        db.delete(project)
+        db.commit()
+        return {"ok": True, "message": "Проект успешно удален"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, str(e))
+

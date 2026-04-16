@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QFrame, QGridLayout, QScrollArea, QTabWidget, QComboBox,
     QTableWidget, QTableWidgetItem, QHeaderView
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
 
 from ..database import get_session
 from ..models import Device, WorkLog, User, Workplace
@@ -28,12 +28,99 @@ except Exception as _mpl_err:
 from datetime import datetime, timedelta
 from sqlalchemy import func
 
+class AnalyticsGeneralWorker(QObject):
+    """Рабочий для фоновой загрузки общей аналитики."""
+    finished = pyqtSignal(dict)
+    error = pyqtSignal(str)
+
+    def run(self):
+        try:
+            session = get_session()
+            now = datetime.now()
+            today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            week_ago = now - timedelta(days=7)
+
+            results = {}
+
+            # Карточки
+            results['total'] = session.query(Device).count()
+            results['completed'] = session.query(WorkLog).filter(
+                WorkLog.action == 'COMPLETED',
+                WorkLog.created_at >= today_start
+            ).count()
+            results['defects'] = session.query(Device).filter(Device.status == 'DEFECT').count()
+            
+            pipeline_statuses = Device.PIPELINE_STAGES
+            results['active'] = session.query(Device).filter(
+                Device.status.in_(pipeline_statuses)
+            ).count()
+
+            # Статусы (Graph 1)
+            status_counts = session.query(
+                Device.status, func.count(Device.id)
+            ).group_by(Device.status).all()
+            results['status_data'] = {
+                'labels': [Device.STATUS_DISPLAY.get(s, s) for s, _ in status_counts],
+                'sizes': [c for _, c in status_counts],
+                'colors': [DEVICE_STATUS_COLORS.get(s, '#6c757d') for s, _ in status_counts]
+            }
+
+            # Неделя (Graph 2)
+            weekly_data = {}
+            logs = session.query(
+                func.date(WorkLog.created_at).label('day'),
+                func.count(WorkLog.id).label('cnt')
+            ).filter(
+                WorkLog.action == 'COMPLETED',
+                WorkLog.created_at >= week_ago
+            ).group_by('day').all()
+
+            for log in logs:
+                weekly_data[str(log.day)] = log.cnt
+
+            results['weekly_data'] = {'days': [], 'counts': []}
+            for i in range(7):
+                d = (week_ago + timedelta(days=i)).date()
+                results['weekly_data']['days'].append(d.strftime('%d.%m'))
+                results['weekly_data']['counts'].append(weekly_data.get(str(d), 0))
+
+            # Работники (Graph 3)
+            workers = session.query(
+                User.first_name, User.last_name, User.username,
+                func.count(WorkLog.id).label('cnt')
+            ).join(WorkLog, WorkLog.worker_id == User.id).filter(
+                WorkLog.action == 'COMPLETED',
+                WorkLog.created_at >= week_ago
+            ).group_by(User.id).order_by(func.count(WorkLog.id).desc()).limit(8).all()
+
+            results['worker_data'] = []
+            for w in reversed(workers):
+                name = f'{w.first_name or ""} {w.last_name or ""}'.strip() or w.username
+                results['worker_data'].append({'name': name[:15], 'cnt': w.cnt})
+
+            # Места (Graph 4)
+            wp_stats = session.query(
+                Workplace.name, func.count(WorkLog.id).label('cnt')
+            ).join(WorkLog, WorkLog.workplace_id == Workplace.id).filter(
+                WorkLog.created_at >= week_ago
+            ).group_by(Workplace.id).order_by(func.count(WorkLog.id).desc()).limit(10).all()
+
+            results['wp_data'] = [{'name': w.name[:12], 'cnt': w.cnt} for w in wp_stats]
+
+            session.close()
+            self.finished.emit(results)
+        except Exception as e:
+            self.error.emit(str(e))
+
+
 class AnalyticsTab(QWidget):
     """Вкладка Аналитика."""
 
     def __init__(self, user, parent=None):
         super().__init__(parent)
         self.user = user
+        self.thread_general = None
+        self.worker_general = None
         self._setup_ui()
         self.refresh_data()
 
@@ -200,11 +287,12 @@ class AnalyticsTab(QWidget):
             'Время', 'Действие', 'SN устройства', 'Проект', 'Рабочее место'
         ])
         hdr = self.table_logs.horizontalHeader()
-        hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # Время
-        hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  # Действие
-        hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)           # SN
-        hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)           # Проект
-        hdr.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)           # Рабочее место
+        hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents) # Время
+        hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents) # Действие
+        hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)          # SN
+        hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)          # Проект
+        hdr.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)          # Рабочее место
+        
         self.table_logs.setAlternatingRowColors(True)
         self.table_logs.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table_logs.verticalHeader().setVisible(False)
@@ -354,53 +442,56 @@ class AnalyticsTab(QWidget):
             print(f'Employee data error: {e}')
 
     def _refresh_general_data(self) -> None:
-        """Обновление графиков."""
+        """Запуск фоновой загрузки графиков."""
         if not HAS_MATPLOTLIB:
             return
 
+        # Проверка, не запущен ли уже поток
+        if hasattr(self, 'thread_general') and self.thread_general is not None:
+            try:
+                if self.thread_general.isRunning():
+                    return
+            except RuntimeError:
+                # Объект потока был удален на стороне C++, сбрасываем ссылку
+                self.thread_general = None
+
+        self.thread_general = QThread()
+        self.worker_general = AnalyticsGeneralWorker()
+        self.worker_general.moveToThread(self.thread_general)
+
+        self.thread_general.started.connect(self.worker_general.run)
+        self.worker_general.finished.connect(self._on_general_data_loaded)
+        self.worker_general.error.connect(self._on_general_error)
+        
+        # Очистка потока после завершения
+        self.worker_general.finished.connect(self.thread_general.quit)
+        self.worker_general.finished.connect(self.worker_general.deleteLater)
+        self.thread_general.finished.connect(self.thread_general.deleteLater)
+        self.thread_general.finished.connect(lambda: setattr(self, 'thread_general', None))
+
+        self.thread_general.start()
+
+    def _on_general_data_loaded(self, results: dict) -> None:
+        """Отрисовка полученных аналитических данных."""
+        # 1. Карточки
+        self._update_card(self.card_total, str(results['total']))
+        self._update_card(self.card_completed, str(results['completed']))
+        self._update_card(self.card_defects, str(results['defects']))
+        self._update_card(self.card_active, str(results['active']))
+
         try:
-            session = get_session()
-            now = datetime.now()
-            today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-            week_ago = now - timedelta(days=7)
-
-            total = session.query(Device).count()
-            self._update_card(self.card_total, str(total))
-
-            completed = session.query(WorkLog).filter(
-                WorkLog.action == 'COMPLETED',
-                WorkLog.created_at >= today_start
-            ).count()
-            self._update_card(self.card_completed, str(completed))
-
-            defects = session.query(Device).filter(Device.status == 'DEFECT').count()
-            self._update_card(self.card_defects, str(defects))
-
-            pipeline_statuses = Device.PIPELINE_STAGES
-            on_line = session.query(Device).filter(
-                Device.status.in_(pipeline_statuses)
-            ).count()
-            self._update_card(self.card_active, str(on_line))
-
-            # ---- GRAPH 1 ----
+            # 2. Graph 1: Статусы
             self.fig_status.clear()
             ax1 = self.fig_status.add_subplot(111)
             ax1.set_facecolor(COLORS['bg_surface'])
-
-            status_counts = session.query(
-                Device.status, func.count(Device.id)
-            ).group_by(Device.status).all()
-
-            if status_counts:
-                labels = [Device.STATUS_DISPLAY.get(s, s) for s, _ in status_counts]
-                sizes = [c for _, c in status_counts]
-                colors = [DEVICE_STATUS_COLORS.get(s, '#6c757d') for s, _ in status_counts]
+            sd = results['status_data']
+            if sd['sizes']:
                 wedges, texts, autotexts = ax1.pie(
-                    sizes, labels=None, colors=colors,
+                    sd['sizes'], labels=None, colors=sd['colors'],
                     autopct='%1.0f%%', startangle=90,
                     pctdistance=0.8, textprops={'color': COLORS['text_primary'], 'fontsize': 8}
                 )
-                ax1.legend(labels, loc='center left', bbox_to_anchor=(1, 0.5),
+                ax1.legend(sd['labels'], loc='center left', bbox_to_anchor=(1, 0.5),
                            fontsize=7, facecolor=COLORS['bg_surface'],
                            edgecolor=COLORS['border'],
                            labelcolor=COLORS['text_secondary'])
@@ -409,108 +500,63 @@ class AnalyticsTab(QWidget):
             else:
                 ax1.text(0.5, 0.5, 'Нет данных', ha='center', va='center',
                          color=COLORS['text_muted'], fontsize=12, transform=ax1.transAxes)
-
             self.fig_status.tight_layout()
             self.canvas_status.draw()
 
-            # ---- GRAPH 2 ----
+            # 3. Graph 2: Неделя
             self.fig_weekly.clear()
             ax2 = self.fig_weekly.add_subplot(111)
             ax2.set_facecolor(COLORS['bg_surface'])
-
-            weekly_data = {}
-            logs = session.query(
-                func.date(WorkLog.created_at).label('day'),
-                func.count(WorkLog.id).label('cnt')
-            ).filter(
-                WorkLog.action == 'COMPLETED',
-                WorkLog.created_at >= week_ago
-            ).group_by('day').all()
-
-            for log in logs:
-                weekly_data[str(log.day)] = log.cnt
-
-            days = []
-            counts = []
-            for i in range(7):
-                d = (week_ago + timedelta(days=i)).date()
-                days.append(d.strftime('%d.%m'))
-                counts.append(weekly_data.get(str(d), 0))
-
-            bars = ax2.bar(days, counts, color=COLORS['accent'])
+            wd = results['weekly_data']
+            ax2.bar(wd['days'], wd['counts'], color=COLORS['accent'])
             ax2.tick_params(colors=COLORS['text_secondary'], labelsize=8)
             ax2.spines['top'].set_visible(False)
             ax2.spines['right'].set_visible(False)
             ax2.spines['bottom'].set_color(COLORS['border'])
             ax2.spines['left'].set_color(COLORS['border'])
             ax2.set_ylabel('Кол-во', color=COLORS['text_secondary'], fontsize=9)
-
             self.fig_weekly.tight_layout()
             self.canvas_weekly.draw()
 
-            # ---- GRAPH 3 ----
+            # 4. Graph 3: Работники
             self.fig_workers.clear()
             ax3 = self.fig_workers.add_subplot(111)
             ax3.set_facecolor(COLORS['bg_surface'])
-
-            workers = session.query(
-                User.first_name, User.last_name, User.username,
-                func.count(WorkLog.id).label('cnt')
-            ).join(WorkLog, WorkLog.worker_id == User.id).filter(
-                WorkLog.action == 'COMPLETED',
-                WorkLog.created_at >= week_ago
-            ).group_by(User.id).order_by(func.count(WorkLog.id).desc()).limit(8).all()
-
-            if workers:
-                w_names = []
-                w_counts = []
-                for w in reversed(workers):
-                    name = f'{w.first_name or ""} {w.last_name or ""}'.strip() or w.username
-                    w_names.append(name[:15])
-                    w_counts.append(w.cnt)
-                ax3.barh(w_names, w_counts, color=COLORS['success'], height=0.6)
+            wr = results['worker_data']
+            if wr:
+                ax3.barh([w['name'] for w in wr], [w['cnt'] for w in wr], color=COLORS['success'], height=0.6)
                 ax3.tick_params(colors=COLORS['text_secondary'], labelsize=8)
             else:
                 ax3.text(0.5, 0.5, 'Нет данных', ha='center', va='center',
                          color=COLORS['text_muted'], fontsize=12, transform=ax3.transAxes)
-
             ax3.spines['top'].set_visible(False)
             ax3.spines['right'].set_visible(False)
             ax3.spines['bottom'].set_color(COLORS['border'])
             ax3.spines['left'].set_color(COLORS['border'])
-
             self.fig_workers.tight_layout()
             self.canvas_workers.draw()
 
-            # ---- GRAPH 4 ----
+            # 5. Graph 4: Места
             self.fig_workplaces.clear()
             ax4 = self.fig_workplaces.add_subplot(111)
             ax4.set_facecolor(COLORS['bg_surface'])
-
-            wp_stats = session.query(
-                Workplace.name, func.count(WorkLog.id).label('cnt')
-            ).join(WorkLog, WorkLog.workplace_id == Workplace.id).filter(
-                WorkLog.created_at >= week_ago
-            ).group_by(Workplace.id).order_by(func.count(WorkLog.id).desc()).limit(10).all()
-
-            if wp_stats:
-                wp_names = [w.name[:12] for w in wp_stats]
-                wp_counts = [w.cnt for w in wp_stats]
-                bars = ax4.bar(wp_names, wp_counts, color=COLORS['info'], width=0.6)
+            wpt = results['wp_data']
+            if wpt:
+                ax4.bar([w['name'] for w in wpt], [w['cnt'] for w in wpt], color=COLORS['info'], width=0.6)
                 ax4.tick_params(colors=COLORS['text_secondary'], labelsize=7, rotation=45)
             else:
                 ax4.text(0.5, 0.5, 'Нет данных', ha='center', va='center',
                          color=COLORS['text_muted'], fontsize=12, transform=ax4.transAxes)
-
             ax4.spines['top'].set_visible(False)
             ax4.spines['right'].set_visible(False)
             ax4.spines['bottom'].set_color(COLORS['border'])
             ax4.spines['left'].set_color(COLORS['border'])
-
             self.fig_workplaces.tight_layout()
             self.canvas_workplaces.draw()
 
-            session.close()
         except Exception as e:
-            print(f'General analytics error: {e}')
+            print(f"Error drawing charts: {e}")
+
+    def _on_general_error(self, error_msg: str) -> None:
+        print(f'General analytics error: {error_msg}')
 

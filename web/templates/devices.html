@@ -106,12 +106,12 @@ async function searchDevice() {
             } else {
                 tbody.innerHTML = res.history.map(row => `
                     <tr>
-                        <td style="white-space: nowrap;">${row.created_at}</td>
-                        <td><strong>${row.action}</strong></td>
-                        <td>${row.workplace}</td>
-                        <td>${row.worker}</td>
-                        <td><span style="font-size: 13px; color: var(--text-muted);">${row.status_change}</span></td>
-                        <td>${row.notes}</td>
+                        <td style="white-space: nowrap;">${escapeHTML(row.created_at)}</td>
+                        <td><strong>${escapeHTML(row.action)}</strong></td>
+                        <td>${escapeHTML(row.workplace)}</td>
+                        <td>${escapeHTML(row.worker)}</td>
+                        <td><span style="font-size: 13px; color: var(--text-muted);">${escapeHTML(row.status_change)}</span></td>
+                        <td>${escapeHTML(row.notes)}</td>
                     </tr>
                 `).join('');
             }
