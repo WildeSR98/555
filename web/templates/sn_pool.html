@@ -135,7 +135,7 @@ async function loadTree() {
         
         data.forEach(cat => {
             const li = document.createElement('li');
-            li.innerHTML = `<div class="tree-cat">📁 ${cat.name}</div>`;
+            li.innerHTML = `<div class="tree-cat">📁 ${escapeHTML(cat.name)}</div>`;
             const mul = document.createElement('ul');
             mul.style.listStyle = 'none';
             mul.style.padding = '0';
@@ -143,7 +143,7 @@ async function loadTree() {
             cat.models.forEach(m => {
                 const mli = document.createElement('li');
                 mli.className = 'tree-mod';
-                mli.innerHTML = `📄 ${m.name}`;
+                mli.innerHTML = `📄 ${escapeHTML(m.name)}`;
                 if (currentModelId === m.id) mli.classList.add('active');
                 
                 mli.onclick = (e) => {
@@ -192,10 +192,10 @@ async function fetchSNList(searchQuery = '') {
         tbody.innerHTML = sns.map(s => `
             <tr>
                 <td>${s.id}</td>
-                <td><code>${s.sn}</code></td>
+                <td><code>${escapeHTML(s.sn)}</code></td>
                 <td>${s.is_used ? '<span class="badge badge-success">Использован</span>' : '<span class="badge">Резерв (Якорь)</span>'}</td>
-                <td>${s.project} ${s.device !== '—' ? '(' + s.device + ')' : ''}</td>
-                <td>${s.created_at}</td>
+                <td>${escapeHTML(s.project)} ${s.device !== '—' ? '(' + escapeHTML(s.device) + ')' : ''}</td>
+                <td>${escapeHTML(s.created_at)}</td>
             </tr>
         `).join('');
     } catch (e) {

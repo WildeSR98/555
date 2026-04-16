@@ -6,6 +6,8 @@
 from fastapi import APIRouter, Request, Depends, Form
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
+from fastapi_csrf_protect import CsrfProtect
+from starlette.responses import Response
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -37,34 +39,63 @@ def get_current_user(request: Request) -> User | None:
 
 
 @router.get("/login")
-async def login_page(request: Request):
+async def login_page(request: Request, csrf_protect: CsrfProtect = Depends()):
     """Страница входа."""
-    return templates.TemplateResponse("login.html", {"request": request, "error": None})
+    csrf_token, signed_token = csrf_protect.generate_csrf_tokens()
+    response = templates.TemplateResponse("login.html", {
+        "request": request,
+        "error": None,
+        "csrf_token": csrf_token
+    })
+    csrf_protect.set_csrf_cookie(signed_token, response)
+    return response
 
 
 @router.post("/login")
 async def login_submit(
     request: Request,
-    username: str = Form(...),
-    password: str = Form(...),
     db: Session = Depends(get_db),
+    csrf_protect: CsrfProtect = Depends(),
 ):
     """Обработка входа."""
-    import hashlib
+    # Сначала распарсим форму вручную, чтобы validate_csrf мог её прочитать
+    form_data = await request.form()
+    username = form_data.get("username", "")
+    password = form_data.get("password", "")
     
+    # Валидация CSRF-токена из формы
+    try:
+        await csrf_protect.validate_csrf(request)
+    except Exception as e:
+        csrf_token, signed_token = csrf_protect.generate_csrf_tokens()
+        response = templates.TemplateResponse("login.html", {
+            "request": request,
+            "error": f"Ошибка CSRF-защиты: {str(e)}",
+            "csrf_token": csrf_token
+        })
+        csrf_protect.set_csrf_cookie(signed_token, response)
+        return response
+    
+    import hashlib
+
     user = db.query(User).filter(
         (User.username == username) | (User.action_pin == username)
     ).first()
-    
+
     if user and user.check_password(password):
         request.session["user_id"] = user.id
         request.session["username"] = user.username
         return RedirectResponse(url="/dashboard", status_code=303)
-    
-    return templates.TemplateResponse("login.html", {
+
+    # При ошибке аутентификации возвращаем форму с токеном
+    csrf_token, signed_token = csrf_protect.generate_csrf_tokens()
+    response = templates.TemplateResponse("login.html", {
         "request": request,
         "error": "Неверный логин или пароль",
+        "csrf_token": csrf_token
     })
+    csrf_protect.set_csrf_cookie(signed_token, response)
+    return response
 
 
 @router.get("/logout")

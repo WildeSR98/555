@@ -8,13 +8,121 @@ from PyQt6.QtWidgets import (
     QTreeWidgetItem, QPushButton, QLineEdit, QComboBox, QHeaderView,
     QSplitter, QTableWidget, QTableWidgetItem, QFrame
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
 from PyQt6.QtGui import QColor
 
+from sqlalchemy.orm import selectinload
 from ..database import get_session
 from ..models import Project, Device, Operation, SerialNumber
 from .styles import COLORS, DEVICE_STATUS_COLORS
 from .widgets.status_badge import StatusBadge
+
+
+class ProjectLoadWorker(QObject):
+    """Рабочий для фоновой загрузки данных проектов."""
+    finished = pyqtSignal(list)
+    error = pyqtSignal(str)
+
+    def __init__(self, status_filter):
+        super().__init__()
+        self.status_filter = status_filter
+
+    def run(self):
+        try:
+            session = get_session()
+            # Оптимизированный запрос с предзагрузкой связанных данных
+            query = session.query(Project).options(
+                selectinload(Project.devices).selectinload(Device.operations)
+            ).order_by(Project.created_at.desc())
+            
+            if self.status_filter:
+                query = query.filter(Project.status == self.status_filter)
+
+            projects = query.all()
+            data = []
+
+            for p in projects:
+                p_data = {
+                    'id': p.id,
+                    'name': p.name,
+                    'code': p.code or '',
+                    'status_display': p.status_display,
+                    'status_color': Project.STATUS_COLORS.get(p.status, '#6c757d'),
+                    'devices': []
+                }
+
+                # Используем уже подгруженные устройства (без новых запросов в базу)
+                for d in p.devices:
+                    d_data = {
+                        'id': d.id,
+                        'name': d.name,
+                        'code': d.code or '',
+                        'status_display': d.status_display,
+                        'status_color': Device.STATUS_COLORS.get(d.status, '#6c757d'),
+                        'sn_pn': f'SN: {d.serial_number}' if d.serial_number else f'PN: {d.part_number}',
+                        'operations': []
+                    }
+
+                    # Используем уже подгруженные операции
+                    for op in d.operations:
+                        op_data = {
+                            'id': op.id,
+                            'title': op.title,
+                            'code': op.code or '',
+                            'status_display': op.status_display,
+                            'status_color': Operation.STATUS_COLORS.get(op.status, '#6c757d')
+                        }
+                        d_data['operations'].append(op_data)
+                    
+                    p_data['devices'].append(d_data)
+                
+                data.append(p_data)
+
+            session.close()
+            self.finished.emit(data)
+        except Exception as e:
+            self.error.emit(str(e))
+
+
+class StatsLoadWorker(QObject):
+    """Рабочий для фонового расчета статистики проекта."""
+    finished = pyqtSignal(dict)
+    error = pyqtSignal(str)
+
+    def __init__(self, project_id: int):
+        super().__init__()
+        self.project_id = project_id
+
+    def run(self):
+        try:
+            from sqlalchemy import func
+            session = get_session()
+            
+            # Группировка статусов
+            not_started_group = [
+                'WAITING_KITTING', 'PRE_PRODUCTION', 'WAITING_ASSEMBLY', 
+                'WAITING_PARTS', 'WAITING_SOFTWARE'
+            ]
+            done_group = ['WAREHOUSE', 'QC_PASSED', 'SHIPPED']
+            
+            stats = session.query(
+                Device.status, func.count(Device.id)
+            ).filter(Device.project_id == self.project_id).group_by(Device.status).all()
+            
+            counts = {'not_started': 0, 'in_work': 0, 'done': 0}
+            
+            for status, count in stats:
+                if status in not_started_group:
+                    counts['not_started'] += count
+                elif status in done_group:
+                    counts['done'] += count
+                else:
+                    counts['in_work'] += count
+            
+            session.close()
+            self.finished.emit(counts)
+        except Exception as e:
+            self.error.emit(str(e))
 
 
 class ProjectsTab(QWidget):
@@ -23,6 +131,10 @@ class ProjectsTab(QWidget):
     def __init__(self, user, parent=None):
         super().__init__(parent)
         self.user = user
+        self.thread = None
+        self.worker = None
+        self.thread_stats = None
+        self.worker_stats = None
         self._setup_ui()
         self.refresh_data()
 
@@ -111,11 +223,14 @@ class ProjectsTab(QWidget):
         self.details_table = QTableWidget()
         self.details_table.setColumnCount(2)
         self.details_table.setHorizontalHeaderLabels(['Поле', 'Значение'])
-        self.details_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.details_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        hdr_det = self.details_table.horizontalHeader()
+        hdr_det.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents) # Поле
+        hdr_det.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)          # Значение
+        
         self.details_table.verticalHeader().setVisible(False)
         self.details_table.setAlternatingRowColors(True)
         self.details_table.setWordWrap(True)
+        self.details_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         details_layout.addWidget(self.details_table)
 
         self.btn_delete_project = QPushButton('🗑 Удалить проект')
@@ -387,106 +502,97 @@ class ProjectsTab(QWidget):
                     QMessageBox.critical(self, 'Ошибка', f'Ошибка при создании проекта:\n{e}')
 
     def _update_statistics(self, project_id: Optional[int] = None) -> None:
-        """Расчет статистики по конкретному проекту."""
+        """Запуск фонового расчета статистики по проекту."""
         if not project_id:
             self.project_stats_widget.setVisible(False)
             return
 
-        try:
-            session = get_session()
-            from sqlalchemy import func
-            
-            # Группировка статусов
-            not_started_group = [
-                'WAITING_KITTING', 'PRE_PRODUCTION', 'WAITING_ASSEMBLY', 
-                'WAITING_PARTS', 'WAITING_SOFTWARE'
-            ]
-            done_group = ['WAREHOUSE', 'QC_PASSED', 'SHIPPED']
-            
-            # Статистика только по ОДНОМУ проекту
-            stats = session.query(
-                Device.status, func.count(Device.id)
-            ).filter(Device.project_id == project_id).group_by(Device.status).all()
-            
-            counts = {'not_started': 0, 'in_work': 0, 'done': 0}
-            
-            for status, count in stats:
-                if status in not_started_group:
-                    counts['not_started'] += count
-                elif status in done_group:
-                    counts['done'] += count
-                else:
-                    counts['in_work'] += count
-            
-            # Обновление UI
-            self.stat_not_started.value_label.setText(str(counts['not_started']))
-            self.stat_in_work.value_label.setText(str(counts['in_work']))
-            self.stat_done.value_label.setText(str(counts['done']))
-            
-            self.project_stats_widget.setVisible(True)
-            session.close()
-        except Exception as e:
-            print(f"Stats error: {e}")
+        if self.thread_stats and self.thread_stats.isRunning():
+            return
+
+        self.thread_stats = QThread()
+        self.worker_stats = StatsLoadWorker(project_id)
+        self.worker_stats.moveToThread(self.thread_stats)
+
+        self.thread_stats.started.connect(self.worker_stats.run)
+        self.worker_stats.finished.connect(self._on_stats_loaded)
+        self.worker_stats.finished.connect(self.thread_stats.quit)
+        self.worker_stats.finished.connect(self.worker_stats.deleteLater)
+        self.thread_stats.finished.connect(self.thread_stats.deleteLater)
+
+        self.thread_stats.start()
+
+    def _on_stats_loaded(self, counts: dict) -> None:
+        """Отображение полученной статистики."""
+        self.stat_not_started.value_label.setText(str(counts['not_started']))
+        self.stat_in_work.value_label.setText(str(counts['in_work']))
+        self.stat_done.value_label.setText(str(counts['done']))
+        self.project_stats_widget.setVisible(True)
 
     def refresh_data(self) -> None:
-        """Загрузка данных в дерево."""
+        """Запуск фоновой загрузки данных в дерево."""
         self.project_stats_widget.setVisible(False)
+        
+        # Блокируем кнопку обновления или показываем статус за нагрузкой
+        # self.tree.setEnabled(False) 
+        # (Опционально можно добавить индикатор загрузки)
+
+        # Останавливаем предыдущий поток если есть
+        if self.thread:
+            try:
+                if self.thread.isRunning():
+                    return
+            except RuntimeError:
+                self.thread = None
+
+        status_filter = self.status_filter.currentData()
+        
+        self.thread = QThread()
+        self.worker = ProjectLoadWorker(status_filter)
+        self.worker.moveToThread(self.thread)
+
+        self.thread.started.connect(self.worker.run)
+        self.worker.finished.connect(self._on_data_loaded)
+        self.worker.error.connect(self._on_load_error)
+        self.worker.finished.connect(self.thread.quit)
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.thread.finished.connect(self.thread.deleteLater)
+
+        self.thread.start()
+
+    def _on_data_loaded(self, projects_data: list) -> None:
+        """Отрисовка полученных данных."""
         self.tree.clear()
-        try:
-            session = get_session()
+        
+        for p in projects_data:
+            # Проект
+            proj_item = QTreeWidgetItem(self.tree)
+            proj_item.setText(0, f'📁 {p["name"]}')
+            proj_item.setText(1, p["code"])
+            proj_item.setText(2, p["status_display"])
+            proj_item.setData(0, Qt.ItemDataRole.UserRole, ('project', p["id"]))
+            proj_item.setForeground(2, QColor(p["status_color"]))
 
-            status_filter = self.status_filter.currentData()
-            query = session.query(Project).order_by(Project.created_at.desc())
-            if status_filter:
-                query = query.filter(Project.status == status_filter)
+            for d in p['devices']:
+                dev_item = QTreeWidgetItem(proj_item)
+                dev_item.setText(0, f'  💻 {d["name"]}')
+                dev_item.setText(1, d["code"])
+                dev_item.setText(2, d["status_display"])
+                dev_item.setText(3, d["sn_pn"])
+                dev_item.setData(0, Qt.ItemDataRole.UserRole, ('device', d["id"]))
+                dev_item.setForeground(2, QColor(d["status_color"]))
 
-            projects = query.all()
+                for op in d['operations']:
+                    op_item = QTreeWidgetItem(dev_item)
+                    op_item.setText(0, f'    ⚙ {op["title"]}')
+                    op_item.setText(1, op["code"])
+                    op_item.setText(2, op["status_display"])
+                    op_item.setData(0, Qt.ItemDataRole.UserRole, ('operation', op["id"]))
+                    op_item.setForeground(2, QColor(op["status_color"]))
 
-            for project in projects:
-                # Проект
-                proj_item = QTreeWidgetItem(self.tree)
-                proj_item.setText(0, f'📁 {project.name}')
-                proj_item.setText(1, project.code or '')
-                proj_item.setText(2, project.status_display)
-                proj_item.setData(0, Qt.ItemDataRole.UserRole, ('project', project.id))
-
-                color = Project.STATUS_COLORS.get(project.status, '#6c757d')
-                proj_item.setForeground(2, QColor(color))
-
-                # Устройства
-                devices = session.query(Device).filter(
-                    Device.project_id == project.id
-                ).order_by(Device.name).all()
-
-                for device in devices:
-                    dev_item = QTreeWidgetItem(proj_item)
-                    dev_item.setText(0, f'  💻 {device.name}')
-                    dev_item.setText(1, device.code or '')
-                    dev_item.setText(2, device.status_display)
-                    dev_item.setText(3, f'SN: {device.serial_number}' if device.serial_number else f'PN: {device.part_number}')
-                    dev_item.setData(0, Qt.ItemDataRole.UserRole, ('device', device.id))
-
-                    dev_color = Device.STATUS_COLORS.get(device.status, '#6c757d')
-                    dev_item.setForeground(2, QColor(dev_color))
-
-                    # Операции
-                    operations = session.query(Operation).filter(
-                        Operation.device_id == device.id
-                    ).order_by(Operation.id).all()
-
-                    for op in operations:
-                        op_item = QTreeWidgetItem(dev_item)
-                        op_item.setText(0, f'    ⚙ {op.title}')
-                        op_item.setText(1, op.code or '')
-                        op_item.setText(2, op.status_display)
-                        op_item.setData(0, Qt.ItemDataRole.UserRole, ('operation', op.id))
-
-                        op_color = Operation.STATUS_COLORS.get(op.status, '#6c757d')
-                        op_item.setForeground(2, QColor(op_color))
-
-            session.close()
-        except Exception as e:
-            print(f'Projects refresh error: {e}')
+    def _on_load_error(self, error_msg: str) -> None:
+        """Обработка ошибки загрузки."""
+        print(f'Projects refresh error: {error_msg}')
 
     def _filter_tree(self, text: str) -> None:
         """Фильтрация дерева по тексту."""
@@ -565,7 +671,7 @@ class ProjectsTab(QWidget):
                         ('Менеджер', project.manager.full_name if project.manager else '—'),
                         ('Дедлайн', str(project.deadline) if project.deadline else '—'),
                         ('Создан', project.created_at.strftime('%d.%m.%Y %H:%M') if project.created_at else '—'),
-                        ('Устройств', str(project.devices.count())),
+                        ('Устройств', str(len(project.devices))),
                     ]
             elif entity_type == 'device':
                 device = session.query(Device).get(entity_id)

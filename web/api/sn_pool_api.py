@@ -23,7 +23,7 @@ class CounterSetInput(BaseModel):
     count: int
 
 @router.get("/tree")
-async def get_sn_tree(db: Session = Depends(get_db)):
+def get_sn_tree(db: Session = Depends(get_db)):
     """Получить дерево Категория -> Модель."""
     models = db.query(DeviceModel).order_by(DeviceModel.category, DeviceModel.name).all()
     
@@ -48,7 +48,7 @@ async def get_sn_tree(db: Session = Depends(get_db)):
 
 
 @router.get("/categories")
-async def get_categories():
+def get_categories():
     """Словарь категорий для формы."""
     res = []
     for k, v in Device.DEVICE_TYPE_DISPLAY.items():
@@ -60,9 +60,13 @@ async def get_categories():
 
 
 @router.get("/models/{model_id}/sns")
-async def get_model_sns(model_id: int, sn: str = "", db: Session = Depends(get_db)):
+def get_model_sns(model_id: int, sn: str = "", db: Session = Depends(get_db)):
     """Получить все SN для конкретной модели (с поиском)."""
-    query = db.query(SerialNumber).filter(SerialNumber.model_id == model_id)
+    from sqlalchemy.orm import joinedload
+    query = db.query(SerialNumber).options(
+        joinedload(SerialNumber.device).joinedload(Device.project)
+    ).filter(SerialNumber.model_id == model_id)
+    
     if sn:
         query = query.filter(SerialNumber.sn.contains(sn))
         
@@ -82,7 +86,7 @@ async def get_model_sns(model_id: int, sn: str = "", db: Session = Depends(get_d
 
 
 @router.post("/models")
-async def create_model(data: ModelCreateInput, db: Session = Depends(get_db)):
+def create_model(data: ModelCreateInput, db: Session = Depends(get_db)):
     """Создать новую модель устройства."""
     if not data.name or not data.sn_prefix:
         raise HTTPException(400, "Название и префикс обязательны")
@@ -102,7 +106,7 @@ async def create_model(data: ModelCreateInput, db: Session = Depends(get_db)):
 
 
 @router.post("/models/{model_id}/counter")
-async def set_counter(model_id: int, data: CounterSetInput, db: Session = Depends(get_db)):
+def set_counter(model_id: int, data: CounterSetInput, db: Session = Depends(get_db)):
     """Установить якорь счетчика."""
     model = db.query(DeviceModel).get(model_id)
     if not model:

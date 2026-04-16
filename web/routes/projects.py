@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 from src.database import get_db
 from src.models import Project, DeviceModel, User
 from web.routes.auth import get_current_user
+from web.dependencies import render_template
+from fastapi_csrf_protect import CsrfProtect
 from pathlib import Path
 
 router = APIRouter()
@@ -18,7 +20,7 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "web" / "templates"))
 
 
 @router.get("/projects")
-async def projects_page(request: Request, db: Session = Depends(get_db)):
+def projects_page(request: Request, db: Session = Depends(get_db), csrf_protect: CsrfProtect = Depends()):
     """Страница Projects."""
     user = get_current_user(request)
     if not user:
@@ -30,10 +32,9 @@ async def projects_page(request: Request, db: Session = Depends(get_db)):
     
     status_choices = Project.STATUS_DISPLAY
 
-    return templates.TemplateResponse("projects.html", {
-        "request": request,
+    return render_template("projects.html", {
         "user": user,
         "managers": managers,
         "device_models": device_models,
         "status_choices": status_choices,
-    })
+    }, request, csrf_protect)

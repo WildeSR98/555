@@ -3,9 +3,9 @@
 {% block title %}Скан — Production Manager{% endblock %}
 
 {% block content %}
-<div class="page-header" style="display:flex; justify-content:space-between; align-items:center;">
+<div class="page-header animate-fade-in" style="display:flex; justify-content:space-between; align-items:center;">
     <div>
-        <h2>📷 Сканирование (Производство)</h2>
+        <h2 style="font-weight: 800; letter-spacing: -0.5px; background: linear-gradient(90deg, var(--primary), var(--info)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;">📷 Сканирование (Производство)</h2>
         <p class="text-muted" id="sessionStatus">Ожидание выбора рабочего места...</p>
     </div>
     <div id="sessionControls" style="display:none;">
@@ -16,22 +16,23 @@
 <div class="scan-container" style="max-width: 800px; margin: 0 auto;">
 
     <!-- ШАГ 1: Вход в систему -->
-    <div id="stepLogin" class="card">
-        <h3>Шаг 1: Авторизация на рабочем месте</h3>
-        <form id="loginForm" onsubmit="startSession(event)">
+    <div id="stepLogin" class="card glass-card animate-fade-in">
+        <h3 style="margin-bottom: 20px; font-weight: 700;">Шаг 1: Авторизация на рабочем месте</h3>
+        <form id="loginForm" onsubmit="startSession(event)" autocomplete="off">
             <div class="form-group">
-                <label>📍 Выберите рабочее место:</label>
+                <label style="font-weight: 600; color: var(--text-muted);">📍 Выберите рабочее место:</label>
                 <select id="workplaceSelect" required class="input-large">
                     <option value="" disabled selected>Загрузка...</option>
                 </select>
             </div>
             
             <div class="form-group mt-4">
-                <label>👤 Пин-код / Бейдж работника:</label>
-                <input type="password" id="workerCode" required placeholder="Просканируйте бейдж или введите пин..." class="input-large" autofocus>
+                <label style="font-weight: 600; color: var(--text-muted);">👤 Пин-код / Бейдж работника:</label>
+                <!-- Используем type="text" с CSS-маской для предотвращения ложных срабатываний менеджеров паролей Chrome -->
+                <input type="text" id="workerCode" required placeholder="Просканируйте бейдж или введите пин..." class="input-large" autofocus autocomplete="off" style="-webkit-text-security: disc;">
             </div>
             
-            <button type="submit" class="btn btn-primary btn-block mt-4" style="font-size: 1.2rem; padding: 1rem;">Начать работу</button>
+            <button type="submit" class="btn btn-primary btn-block-large mt-4">Начать работу</button>
         </form>
     </div>
 
@@ -83,11 +84,15 @@
                 <h3>Шаг 3: Действие</h3>
                 <p class="text-muted" style="margin-bottom:15px; font-size:12px;">Выбрано для обработки: <strong id="selectedCount">0</strong></p>
                 
-                <div style="display:flex; flex-direction:column; gap:10px;">
+                <!-- Фаза 1: Принять в работу -->
+                <div id="phaseAccept" style="display:flex; flex-direction:column; gap:10px;">
+                    <button class="btn btn-primary" style="font-weight:bold; padding:18px; font-size:1.1em;" onclick="doAction('scan_in')">📥 Принять в работу</button>
+                </div>
+
+                <!-- Фаза 2: Действия после приёма -->
+                <div id="phaseAction" style="display:none; flex-direction:column; gap:10px;">
                     <button class="btn btn-success" style="font-weight:bold; padding:15px;" onclick="doAction('complete')">✅ Готово</button>
                     <button class="btn btn-danger" style="font-weight:bold; padding:15px;" onclick="doAction('defect')">⚠️ Брак</button>
-                    <hr style="border:none; border-top:1px solid var(--border); margin:5px 0;">
-                    <button class="btn btn-secondary" onclick="doAction('keep')">📌 Оставить</button>
                     <button class="btn btn-secondary" onclick="doAction('semifinished')">🔧 Отпр. в Полуфабрикат</button>
                 </div>
             </div>
@@ -96,16 +101,9 @@
     </div>
 </div>
 
-<style>
-    .btn-secondary { background: var(--bg); color: var(--text); border: 1px solid var(--border); }
-    .btn-secondary:hover { background: #e2e8f0; }
-    .btn-success { background: var(--success); color: white; border: none; }
-    .btn-success:hover { background: #059669; }
-    .btn-danger { background: var(--error); color: white; border: none; }
-    .btn-danger:hover { background: #dc2626; }
-    .mt-4 { margin-top: 1.5rem; }
-    .sn-item { font-family: monospace; font-size: 14px; }
-</style>
+        </div>
+    </div>
+</div>
 
 <!-- Модалка: Проверка спецификации (Спека) -->
 <div id="specModal" class="modal-overlay" style="display:none;">
@@ -138,10 +136,11 @@ let state = {
     workerId: null,
     workplaceId: null,
     batchLimit: 1,
-    devices: [], // {id, sn, name, status}
-    verifiedProjectIds: [], // Список ID проектов, которые прошли проверку в этой сессии
-    pendingScan: null, // Храним SN, который вызвал проверку
-    pendingProjectData: null, // Храним данные проекта для проверки
+    devices: [],          // {id, sn, name, status, needScanIn}
+    phase: 'accept',      // 'accept' — нужно принять в работу, 'action' — можно закрывать
+    verifiedProjectIds: [],
+    pendingScan: null,
+    pendingProjectData: null,
 };
 
 document.addEventListener('DOMContentLoaded', loadWorkplaces);
@@ -184,7 +183,7 @@ async function startSession(e) {
             document.getElementById('lblWorker').textContent = res.worker_name;
             document.getElementById('lblWorkplace').textContent = res.workplace_name;
             document.getElementById('lblLimit').textContent = res.batch_limit;
-            document.getElementById('sessionStatus').innerHTML = `🟢 Открыта смена. <strong>${res.worker_name}</strong>`;
+            document.getElementById('sessionStatus').innerHTML = `🟢 Открыта смена. <strong>${escapeHTML(res.worker_name)}</strong>`;
             
             document.getElementById('stepLogin').style.display = 'none';
             document.getElementById('stepWork').style.display = 'block';
@@ -192,7 +191,21 @@ async function startSession(e) {
             
             document.getElementById('snInput').focus();
         } else {
-            alert(res.detail || 'Ошибка входа');
+            let msg = res.detail || 'Ошибка входа';
+            if (Array.isArray(res.detail)) {
+                msg = res.detail.map(d => {
+                    const field = d.loc && d.loc.length ? d.loc[d.loc.length - 1] : '';
+                    if (field === 'worker_code' && d.type === 'value_error') {
+                        return `❌ Пин-код должен состоять из латинских букв и цифр (проверьте раскладку клавиатуры!). Вы ввели: "${d.input || ''}"`;
+                    }
+                    return `${field ? field + ': ' : ''}${d.msg}`;
+                }).join('\n');
+            }
+            if (typeof window.showToast === 'function') {
+                window.showToast(msg, 'error');
+            } else {
+                alert(msg);
+            }
             document.getElementById('workerCode').value = '';
             document.getElementById('workerCode').focus();
         }
@@ -251,26 +264,37 @@ async function processScan(e) {
         if (resp.ok) {
             const res = await resp.json();
             if (res.require_spec) {
-                // Требуется проверка спеки
                 state.pendingScan = sn;
                 state.pendingProjectData = res;
                 openSpecModal(res.spec_link);
                 return;
             }
 
-            // Если устройство только взято в работу, не добавляем в буфер
             if (res.need_action) {
-                const dev = res.devices[0]; // TODO: handle multiple if bulk
-                state.devices.push(dev);
-                showToast(`Добавлено в буфер действий: ${dev.sn}`, 'success');
+                res.devices.forEach(dev => {
+                    if (!state.devices.find(d => d.id === dev.id)) {
+                        // Маппируем snake_case -> camelCase
+                        state.devices.push({
+                            id: dev.id,
+                            sn: dev.sn,
+                            name: dev.name,
+                            status: dev.status,
+                            needScanIn: dev.need_scan_in === true
+                        });
+                    }
+                });
+
+                // Определяем фазу по флагу need_scan_in
+                const anyNeedScanIn = res.devices.some(d => d.need_scan_in);
+                if (anyNeedScanIn) {
+                    state.phase = 'accept';
+                } else {
+                    state.phase = 'action';
+                }
+                updatePhaseButtons();
+
+                showToast(`📋 Добавлено в буфер: ${sn}`, 'info');
                 renderDevices();
-            } else {
-                showToast(`✅ Устройство ${sn} принято в работу (SCAN_IN)! Для завершения отсканируйте повторно когда закончите.`, 'info');
-            }
-            
-            // Если есть SCAN_IN но и need_action (например смешанный пакет, хотя у нас по одному)
-            if (res.scan_in_count > 0 && res.need_action) {
-                showToast(`Взято в работу и добавлено в буфер: ${sn}`, 'success');
             }
         } else {
             const err = await resp.text();
@@ -292,7 +316,19 @@ function showFeedback(type, text) {
     if(type === 'success') { color = '#065f46'; bg = '#d1fae5'; }
     if(type === 'warning') { color = '#92400e'; bg = '#fef3c7'; }
     
-    fb.innerHTML = `<div style="padding:10px; border-radius:4px; font-size:14px; font-weight:500; background:${bg}; color:${color};">${text}</div>`;
+    // Handle objects (FastAPI detail etc)
+    let displayText = text;
+    if (typeof text === 'object' && text !== null) {
+        if (text.detail) {
+            displayText = Array.isArray(text.detail) 
+                ? text.detail.map(d => d.msg || JSON.stringify(d)).join(', ')
+                : (typeof text.detail === 'string' ? text.detail : JSON.stringify(text.detail));
+        } else {
+            displayText = JSON.stringify(text);
+        }
+    }
+    
+    fb.innerHTML = `<div style="padding:10px; border-radius:4px; font-size:14px; font-weight:500; background:${bg}; color:${color};">${escapeHTML(displayText)}</div>`;
     setTimeout(() => { fb.innerHTML = ''; }, 4000);
 }
 
@@ -309,8 +345,8 @@ function renderDevices() {
     tbody.innerHTML = state.devices.map(d => `
         <tr>
             <td><input type="checkbox" class="device-check" value="${d.id}" checked onchange="updateSelectedCount()"></td>
-            <td class="sn-item">${d.sn}</td>
-            <td><span class="badge">${d.status}</span></td>
+            <td class="sn-item">${escapeHTML(d.sn)}</td>
+            <td><span class="badge">${escapeHTML(d.status)}</span></td>
         </tr>
     `).join('');
     updateSelectedCount();
@@ -325,6 +361,22 @@ function toggleAll() {
 function updateSelectedCount() {
     const cnt = document.querySelectorAll('.device-check:checked').length;
     document.getElementById('selectedCount').textContent = cnt;
+}
+
+function updatePhaseButtons() {
+    const anyNeedScanIn = state.devices.some(d => d.needScanIn);
+    // Показываем фазу accept только если буфер непустой И есть устройства ожидающие приёма
+    if (state.devices.length > 0 && anyNeedScanIn) {
+        document.getElementById('phaseAccept').style.display = 'flex';
+        document.getElementById('phaseAction').style.display = 'none';
+    } else if (state.devices.length > 0) {
+        document.getElementById('phaseAccept').style.display = 'none';
+        document.getElementById('phaseAction').style.display = 'flex';
+    } else {
+        // Буфер пустой — возвращаемся в фазу приёма
+        document.getElementById('phaseAccept').style.display = 'flex';
+        document.getElementById('phaseAction').style.display = 'none';
+    }
 }
 
 async function doAction(actionName) {
@@ -349,10 +401,28 @@ async function doAction(actionName) {
         
         if (resp.ok) {
             const res = await resp.json();
-            // Удаляем обработанные из стейта
-            state.devices = state.devices.filter(d => !selectedIds.includes(d.id));
+
+            if (actionName === 'scan_in') {
+                // После SCAN_IN — обновляем статус и помечаем устройства как принятые
+                const statusMap = {};
+                (res.results || []).forEach(r => {
+                    if (r.device_id) statusMap[r.device_id] = r.new_status;
+                });
+                state.devices = state.devices.map(d => {
+                    if (selectedIds.includes(d.id)) {
+                        return { ...d, needScanIn: false, status: statusMap[d.id] || d.status };
+                    }
+                    return d;
+                });
+                showFeedback('success', res.message);
+            } else {
+                // После action (complete/defect/semifinished) — удаляем из буфера
+                state.devices = state.devices.filter(d => !selectedIds.includes(d.id));
+                showFeedback('success', res.message);
+            }
+
             renderDevices();
-            showFeedback('success', res.message);
+            updatePhaseButtons();
             document.getElementById('snInput').focus();
         } else {
             const err = await resp.text();

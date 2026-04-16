@@ -72,12 +72,14 @@ class User(Base):
     # Role choices
     ROLE_ADMIN = 'ADMIN'
     ROLE_MANAGER = 'MANAGER'
+    ROLE_SHOP_MANAGER = 'SHOP_MANAGER'
     ROLE_EMPLOYEE = 'EMPLOYEE'
     ROLE_WORKER = 'WORKER'
 
     ROLE_DISPLAY = {
         'ADMIN': 'Администратор',
         'MANAGER': 'Менеджер',
+        'SHOP_MANAGER': 'Начальник цеха',
         'EMPLOYEE': 'Сотрудник',
         'WORKER': 'Работник производства',
     }
@@ -160,7 +162,7 @@ class Project(Base):
     name = Column(String(200), nullable=False)
     description = Column(Text, default='')
     status = Column(String(50), default='PLANNING')
-    manager_id = Column(Integer, ForeignKey('accounts_user.id'), nullable=True)
+    manager_id = Column(Integer, ForeignKey('accounts_user.id', ondelete='SET NULL'), nullable=True)
     created_at = Column(DateTime)
     updated_at = Column(DateTime)
     deadline = Column(Date, nullable=True)
@@ -169,7 +171,7 @@ class Project(Base):
 
     # Relationships
     manager = relationship('User', foreign_keys=[manager_id])
-    devices = relationship('Device', back_populates='project', lazy='dynamic')
+    devices = relationship('Device', back_populates='project', cascade='all, delete-orphan')
 
     STATUS_DISPLAY = {
         'PLANNING': 'Планирование',
@@ -216,7 +218,7 @@ class SerialNumber(Base):
     sn = Column(String(100), unique=True, nullable=False, index=True)
     model_id = Column(Integer, ForeignKey('tasks_devicemodel.id'), nullable=False)
     is_used = Column(Boolean, default=False)
-    device_id = Column(Integer, ForeignKey('tasks_device.id'), nullable=True)
+    device_id = Column(Integer, ForeignKey('tasks_device.id', ondelete='SET NULL'), nullable=True)
     created_at = Column(DateTime)
     
     device_model = relationship('DeviceModel', backref='serial_numbers')
@@ -231,23 +233,23 @@ class Device(Base):
 
     id = Column(Integer, primary_key=True)
     code = Column(String(20), unique=True, nullable=True)
-    project_id = Column(Integer, ForeignKey('tasks_project.id'), nullable=False)
+    project_id = Column(Integer, ForeignKey('tasks_project.id', ondelete='CASCADE'), nullable=False)
     name = Column(String(200), nullable=False)
     serial_number = Column(String(100), default='', index=True)
     device_type = Column(String(20), default='COMPUTER')
     part_number = Column(String(100), default='', index=True)
     is_semifinished = Column(Boolean, default=False)
     location = Column(String(200), default='')
-    current_worker_id = Column(Integer, ForeignKey('accounts_user.id'), nullable=True)
+    current_worker_id = Column(Integer, ForeignKey('accounts_user.id', ondelete='SET NULL'), nullable=True)
     status = Column(String(50), default='WAITING_KITTING', index=True)
     description = Column(Text, default='')
-    created_at = Column(DateTime)
-    updated_at = Column(DateTime)
+    created_at = Column(DateTime, index=True)
+    updated_at = Column(DateTime, index=True)
 
     # Relationships
     project = relationship('Project', back_populates='devices')
     current_worker = relationship('User', foreign_keys=[current_worker_id])
-    operations = relationship('Operation', back_populates='device', lazy='dynamic')
+    operations = relationship('Operation', back_populates='device', cascade='all, delete-orphan')
     sn_record = relationship('SerialNumber', backref='device', uselist=False)
 
     DEVICE_TYPE_DISPLAY = {
@@ -371,7 +373,7 @@ class Operation(Base):
 
     id = Column(Integer, primary_key=True)
     code = Column(String(20), unique=True, nullable=True)
-    device_id = Column(Integer, ForeignKey('tasks_device.id'), nullable=False)
+    device_id = Column(Integer, ForeignKey('tasks_device.id', ondelete='CASCADE'), nullable=False)
     title = Column(String(200), nullable=False)
     description = Column(Text, default='')
     status = Column(String(20), default='PENDING')
@@ -481,9 +483,9 @@ class WorkSession(Base):
     __tablename__ = 'production_worksession'
 
     id = Column(Integer, primary_key=True)
-    workplace_id = Column(Integer, ForeignKey('production_workplace.id'), nullable=False)
-    worker_id = Column(Integer, ForeignKey('accounts_user.id'), nullable=False)
-    started_at = Column(DateTime)
+    workplace_id = Column(Integer, ForeignKey('production_workplace.id'), nullable=False, index=True)
+    worker_id = Column(Integer, ForeignKey('accounts_user.id'), nullable=False, index=True)
+    started_at = Column(DateTime, index=True)
     ended_at = Column(DateTime, nullable=True)
     is_active = Column(Boolean, default=True, index=True)
 
@@ -500,11 +502,11 @@ class WorkLog(Base):
     __tablename__ = 'production_worklog'
 
     id = Column(Integer, primary_key=True)
-    worker_id = Column(Integer, ForeignKey('accounts_user.id'), nullable=False)
-    session_id = Column(Integer, ForeignKey('production_worksession.id'), nullable=True)
-    workplace_id = Column(Integer, ForeignKey('production_workplace.id'), nullable=False)
-    device_id = Column(Integer, ForeignKey('tasks_device.id'), nullable=False)
-    project_id = Column(Integer, ForeignKey('tasks_project.id'), nullable=False)
+    worker_id = Column(Integer, ForeignKey('accounts_user.id', ondelete='SET NULL'), nullable=False, index=True)
+    session_id = Column(Integer, ForeignKey('production_worksession.id', ondelete='SET NULL'), nullable=True)
+    workplace_id = Column(Integer, ForeignKey('production_workplace.id', ondelete='SET NULL'), nullable=False, index=True)
+    device_id = Column(Integer, ForeignKey('tasks_device.id', ondelete='SET NULL'), nullable=False, index=True)
+    project_id = Column(Integer, ForeignKey('tasks_project.id', ondelete='SET NULL'), nullable=False, index=True)
     action = Column(String(30), nullable=False, index=True)
     old_status = Column(String(50), default='')
     new_status = Column(String(50), default='')
@@ -513,7 +515,7 @@ class WorkLog(Base):
     missing_parts = Column(String(500), default='')
     defective_part_sn = Column(String(100), default='')
     notes = Column(Text, default='')
-    created_at = Column(DateTime)
+    created_at = Column(DateTime, index=True)
 
     # Relationships
     worker = relationship('User')

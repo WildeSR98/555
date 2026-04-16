@@ -16,6 +16,8 @@ from datetime import datetime
 from src.database import get_db
 from src.models import Workplace, WorkSession, Device, WorkLog
 from web.routes.auth import get_current_user
+from web.dependencies import render_template
+from fastapi_csrf_protect import CsrfProtect
 from pathlib import Path
 
 router = APIRouter()
@@ -24,8 +26,10 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "web" / "templates"))
 
 
 @router.get("/dashboard")
-async def dashboard_page(request: Request, db: Session = Depends(get_db)):
+def dashboard_page(request: Request, db: Session = Depends(get_db), csrf_protect: CsrfProtect = Depends()):
     """Страница Dashboard."""
+    from sqlalchemy.orm import joinedload
+    
     user = get_current_user(request)
     if not user:
         return RedirectResponse(url="/login")
@@ -43,17 +47,20 @@ async def dashboard_page(request: Request, db: Session = Depends(get_db)):
 
     active_sessions_count = db.query(WorkSession).filter_by(is_active=True).count()
 
-    # Рабочие места со статусом
+    # Рабочие места со статусом (Оптимизировано: получаем количество сессий одним запросом)
+    session_counts = dict(
+        db.query(WorkSession.workplace_id, func.count(WorkSession.id))
+        .filter(WorkSession.is_active == True)
+        .group_by(WorkSession.workplace_id).all()
+    )
+    
     workplaces = db.query(Workplace).filter(
         Workplace.is_active == True
     ).order_by(Workplace.order).all()
 
     workplace_data = []
     for wp in workplaces:
-        active_count = db.query(WorkSession).filter(
-            WorkSession.workplace_id == wp.id,
-            WorkSession.is_active == True
-        ).count()
+        active_count = session_counts.get(wp.id, 0)
         workplace_data.append({
             "name": wp.name,
             "type": wp.type_display,
@@ -61,8 +68,12 @@ async def dashboard_page(request: Request, db: Session = Depends(get_db)):
             "active_count": active_count,
         })
 
-    # Активные сессии
-    sessions = db.query(WorkSession).filter(WorkSession.is_active == True).all()
+    # Активные сессии (Eager loading worker и workplace)
+    sessions = db.query(WorkSession).options(
+        joinedload(WorkSession.worker),
+        joinedload(WorkSession.workplace)
+    ).filter(WorkSession.is_active == True).all()
+    
     session_data = []
     now = datetime.now()
     for sess in sessions:
@@ -82,8 +93,42 @@ async def dashboard_page(request: Request, db: Session = Depends(get_db)):
             "duration": duration,
         })
 
-    return templates.TemplateResponse("dashboard.html", {
-        "request": request,
+    # Распределение по статусам для графика
+    status_distribution = dict(
+        db.query(Device.status, func.count(Device.id))
+        .group_by(Device.status).all()
+    )
+    
+    # Группируем для красоты
+    chart_data = {
+        "Ожидание": sum(v for k, v in status_distribution.items() if k.startswith('WAITING_')),
+        "В работе": sum(v for k, v in status_distribution.items() if k in ('ASSEMBLY', 'PRE_PRODUCTION', 'VIBROSTAND', 'FUNC_CONTROL', 'TECH_CONTROL_1_1', 'TECH_CONTROL_1_2', 'TECH_CONTROL_2_1', 'TECH_CONTROL_2_2', 'PACKING', 'ACCOUNTING')),
+        "Готово/Склад": status_distribution.get('WAREHOUSE', 0) + status_distribution.get('QC_PASSED', 0) + status_distribution.get('SHIPPED', 0),
+        "Брак/Задержка": status_distribution.get('DEFECT', 0) + status_distribution.get('WAITING_PARTS', 0) + status_distribution.get('WAITING_SOFTWARE', 0),
+    }
+
+    # Последние события (логи) (Eager loading device, worker, workplace)
+    recent_logs = []
+    logs = db.query(WorkLog).options(
+        joinedload(WorkLog.device),
+        joinedload(WorkLog.worker),
+        joinedload(WorkLog.workplace)
+    ).order_by(WorkLog.created_at.desc()).limit(8).all()
+    
+    for l in logs:
+        device_sn = "—"
+        if l.device:
+            device_sn = getattr(l.device, 'serial_number', "—") or "—"
+        
+        recent_logs.append({
+            "time": l.created_at.strftime('%H:%M:%S'),
+            "worker": l.worker.username if l.worker else "Система",
+            "action": l.action_display,
+            "sn": device_sn,
+            "workplace": l.workplace.name if l.workplace else "—"
+        })
+
+    return render_template("dashboard.html", {
         "user": user,
         "total_devices": total_devices,
         "completed_today": completed_today,
@@ -91,4 +136,6 @@ async def dashboard_page(request: Request, db: Session = Depends(get_db)):
         "active_sessions_count": active_sessions_count,
         "workplaces": workplace_data,
         "sessions": session_data,
-    })
+        "chart_data": chart_data,
+        "recent_logs": recent_logs,
+    }, request, csrf_protect)

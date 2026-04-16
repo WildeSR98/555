@@ -7,12 +7,83 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QScrollArea,
     QGridLayout, QPushButton, QLineEdit
 )
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QObject
 from PyQt6.QtGui import QFont
 
 from ..database import get_session
 from ..models import Workplace, WorkSession, Device, WorkLog
 from .styles import COLORS, DEVICE_STATUS_COLORS
+
+
+class DashboardLoadWorker(QObject):
+    """Рабочий для фоновой загрузки данных дашборда."""
+    finished = pyqtSignal(dict)
+    error = pyqtSignal(str)
+
+    def run(self):
+        try:
+            from sqlalchemy import func
+            from datetime import datetime, timedelta
+            session = get_session()
+
+            data = {}
+
+            # 1. Сводка
+            data['total'] = session.query(Device).count()
+            
+            today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            data['completed_today'] = session.query(WorkLog).filter(
+                WorkLog.action == 'COMPLETED',
+                WorkLog.created_at >= today_start
+            ).count()
+
+            data['defects'] = session.query(Device).filter(Device.status == 'DEFECT').count()
+            data['active_sessions_count'] = session.query(WorkSession).filter(WorkSession.is_active == True).count()
+
+            # 2. Рабочие места
+            workplaces = session.query(Workplace).filter(
+                Workplace.is_active == True
+            ).order_by(Workplace.order).all()
+
+            data['workplaces'] = []
+            for wp in workplaces:
+                active = session.query(WorkSession).filter(
+                    WorkSession.workplace_id == wp.id,
+                    WorkSession.is_active == True
+                ).count()
+                
+                data['workplaces'].append({
+                    'name': wp.name,
+                    'type_display': wp.type_display,
+                    'pool_text': f'Пул ({wp.pool_limit})' if wp.is_pool else '—',
+                    'status_text': f'🟢 {active} работн.' if active > 0 else '⚪ Свободно'
+                })
+
+            # 3. Активные сессии
+            sessions = session.query(WorkSession).filter(
+                WorkSession.is_active == True
+            ).all()
+
+            data['sessions'] = []
+            for sess in sessions:
+                # Длительность
+                duration = '?'
+                if sess.started_at:
+                    delta = datetime.now() - sess.started_at
+                    mins = int(delta.total_seconds() // 60)
+                    duration = f'{mins // 60}ч {mins % 60}м' if mins >= 60 else f'{mins}м'
+
+                data['sessions'].append({
+                    'worker_name': sess.worker.full_name if sess.worker else '?',
+                    'wp_name': sess.workplace.name if sess.workplace else '?',
+                    'start_time': sess.started_at.strftime('%H:%M') if sess.started_at else '?',
+                    'duration': duration
+                })
+
+            session.close()
+            self.finished.emit(data)
+        except Exception as e:
+            self.error.emit(str(e))
 
 
 class DashboardTab(QWidget):
@@ -21,6 +92,8 @@ class DashboardTab(QWidget):
     def __init__(self, user, parent=None):
         super().__init__(parent)
         self.user = user
+        self.thread = None
+        self.worker = None
         self._setup_ui()
         self.refresh_data()
 
@@ -79,10 +152,12 @@ class DashboardTab(QWidget):
         self.workplaces_table = QTableWidget()
         self.workplaces_table.setColumnCount(4)
         self.workplaces_table.setHorizontalHeaderLabels(['Название', 'Тип', 'Пул', 'Статус'])
-        self.workplaces_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.workplaces_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.workplaces_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.workplaces_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        hdr_wp = self.workplaces_table.horizontalHeader()
+        hdr_wp.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)           # Название
+        hdr_wp.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents) # Тип
+        hdr_wp.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents) # Пул
+        hdr_wp.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents) # Статус
+        
         self.workplaces_table.setAlternatingRowColors(True)
         self.workplaces_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.workplaces_table.verticalHeader().setVisible(False)
@@ -98,7 +173,12 @@ class DashboardTab(QWidget):
         self.sessions_table = QTableWidget()
         self.sessions_table.setColumnCount(4)
         self.sessions_table.setHorizontalHeaderLabels(['Работник', 'Рабочее место', 'Начало', 'Длительность'])
-        self.sessions_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        hdr_sess = self.sessions_table.horizontalHeader()
+        hdr_sess.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)           # Работник
+        hdr_sess.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)           # Рабочее место
+        hdr_sess.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents) # Начало
+        hdr_sess.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents) # Длительность
+        
         self.sessions_table.setAlternatingRowColors(True)
         self.sessions_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.sessions_table.verticalHeader().setVisible(False)
@@ -145,75 +225,55 @@ class DashboardTab(QWidget):
             label.setText(value)
 
     def refresh_data(self) -> None:
-        """Обновление данных дашборда."""
-        try:
-            session = get_session()
+        """Запуск фонового обновления данных дашборда."""
+        # Проверка, не запущен ли уже поток
+        if hasattr(self, 'thread') and self.thread is not None:
+            try:
+                if self.thread.isRunning():
+                    return
+            except RuntimeError:
+                # Объект потока был удален на стороне C++, сбрасываем ссылку
+                self.thread = None
 
-            # Сводные данные
-            from sqlalchemy import func
-            from datetime import datetime, timedelta
+        self.thread = QThread()
+        self.worker = DashboardLoadWorker()
+        self.worker.moveToThread(self.thread)
 
-            total = session.query(Device).count()
-            self._update_card_value(self.card_total, str(total))
+        self.thread.started.connect(self.worker.run)
+        self.worker.finished.connect(self._on_data_loaded)
+        self.worker.error.connect(self._on_load_error)
+        
+        # Очистка потока после завершения
+        self.worker.finished.connect(self.thread.quit)
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.thread.finished.connect(self.thread.deleteLater)
+        self.thread.finished.connect(lambda: setattr(self, 'thread', None))
 
-            today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-            completed_today = session.query(WorkLog).filter(
-                WorkLog.action == 'COMPLETED',
-                WorkLog.created_at >= today_start
-            ).count()
-            self._update_card_value(self.card_today, str(completed_today))
+        self.thread.start()
 
-            defects = session.query(Device).filter(Device.status == 'DEFECT').count()
-            self._update_card_value(self.card_defects, str(defects))
+    def _on_data_loaded(self, data: dict) -> None:
+        """Отрисовка полученных данных."""
+        # 1. Карточки
+        self._update_card_value(self.card_total, str(data['total']))
+        self._update_card_value(self.card_today, str(data['completed_today']))
+        self._update_card_value(self.card_defects, str(data['defects']))
+        self._update_card_value(self.card_sessions, str(data['active_sessions_count']))
 
-            active_sessions = session.query(WorkSession).filter(WorkSession.is_active == True).count()
-            self._update_card_value(self.card_sessions, str(active_sessions))
+        # 2. Таблица рабочих мест
+        self.workplaces_table.setRowCount(len(data['workplaces']))
+        for i, wp in enumerate(data['workplaces']):
+            self.workplaces_table.setItem(i, 0, QTableWidgetItem(wp['name']))
+            self.workplaces_table.setItem(i, 1, QTableWidgetItem(wp['type_display']))
+            self.workplaces_table.setItem(i, 2, QTableWidgetItem(wp['pool_text']))
+            self.workplaces_table.setItem(i, 3, QTableWidgetItem(wp['status_text']))
 
-            # Рабочие места
-            workplaces = session.query(Workplace).filter(
-                Workplace.is_active == True
-            ).order_by(Workplace.order).all()
+        # 3. Таблица сессий
+        self.sessions_table.setRowCount(len(data['sessions']))
+        for i, sess in enumerate(data['sessions']):
+            self.sessions_table.setItem(i, 0, QTableWidgetItem(sess['worker_name']))
+            self.sessions_table.setItem(i, 1, QTableWidgetItem(sess['wp_name']))
+            self.sessions_table.setItem(i, 2, QTableWidgetItem(sess['start_time']))
+            self.sessions_table.setItem(i, 3, QTableWidgetItem(sess['duration']))
 
-            self.workplaces_table.setRowCount(len(workplaces))
-            for i, wp in enumerate(workplaces):
-                self.workplaces_table.setItem(i, 0, QTableWidgetItem(wp.name))
-                self.workplaces_table.setItem(i, 1, QTableWidgetItem(wp.type_display))
-
-                pool_text = f'Пул ({wp.pool_limit})' if wp.is_pool else '—'
-                self.workplaces_table.setItem(i, 2, QTableWidgetItem(pool_text))
-
-                active = session.query(WorkSession).filter(
-                    WorkSession.workplace_id == wp.id,
-                    WorkSession.is_active == True
-                ).count()
-                status_text = f'🟢 {active} работн.' if active > 0 else '⚪ Свободно'
-                self.workplaces_table.setItem(i, 3, QTableWidgetItem(status_text))
-
-            # Активные сессии
-            sessions = session.query(WorkSession).filter(
-                WorkSession.is_active == True
-            ).all()
-
-            self.sessions_table.setRowCount(len(sessions))
-            for i, sess in enumerate(sessions):
-                worker_name = sess.worker.full_name if sess.worker else '?'
-                self.sessions_table.setItem(i, 0, QTableWidgetItem(worker_name))
-
-                wp_name = sess.workplace.name if sess.workplace else '?'
-                self.sessions_table.setItem(i, 1, QTableWidgetItem(wp_name))
-
-                start = sess.started_at.strftime('%H:%M') if sess.started_at else '?'
-                self.sessions_table.setItem(i, 2, QTableWidgetItem(start))
-
-                if sess.started_at:
-                    from datetime import datetime
-                    delta = datetime.now() - sess.started_at
-                    mins = int(delta.total_seconds() // 60)
-                    duration = f'{mins // 60}ч {mins % 60}м' if mins >= 60 else f'{mins}м'
-                else:
-                    duration = '?'
-                self.sessions_table.setItem(i, 3, QTableWidgetItem(duration))
-
-            session.close()
-        except Exception as e:
-            print(f'Dashboard refresh error: {e}')
+    def _on_load_error(self, error_msg: str) -> None:
+        print(f'Dashboard refresh error: {error_msg}')

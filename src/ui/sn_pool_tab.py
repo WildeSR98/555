@@ -6,9 +6,54 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTableWidget, QTableWidgetItem,
     QHeaderView, QPushButton, QComboBox, QLineEdit, QSplitter, QTreeWidget, QTreeWidgetItem, QDialog, QFormLayout, QMessageBox
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
 from ..database import get_session
 from ..models import SerialNumber, Device, DeviceModel
+
+
+class SNPoolLoadWorker(QObject):
+    """Рабочий для фоновой загрузки данных пула SN."""
+    finished = pyqtSignal(list)
+    error = pyqtSignal(str)
+
+    def __init__(self, model_id: int):
+        super().__init__()
+        self.model_id = model_id
+
+    def run(self):
+        try:
+            session = get_session()
+            query = session.query(SerialNumber).filter(SerialNumber.model_id == self.model_id).order_by(SerialNumber.created_at.desc())
+            records = query.all()
+            
+            data = []
+            for rec in records:
+                status_str = ''
+                status_color = None
+                device_str = '—'
+                
+                if rec.device_id is None and rec.is_used:
+                    status_str = '⚙ Сдвиг счетчика (Якорь)'
+                    status_color = 'darkYellow'
+                else:
+                    status_str = '🔴 Использован' if rec.is_used else '🟢 Свободен'
+                    
+                    if rec.device:
+                        proj = rec.device.project
+                        device_str = f"💻 {rec.device.name} (📁 {proj.name if proj else 'Без проекта'})"
+                
+                data.append({
+                    'id': rec.id,
+                    'sn': rec.sn,
+                    'status_str': status_str,
+                    'status_color': status_color,
+                    'device_str': device_str
+                })
+            
+            session.close()
+            self.finished.emit(data)
+        except Exception as e:
+            self.error.emit(str(e))
 
 
 class AddModelDialog(QDialog):
@@ -105,6 +150,8 @@ class SNPoolTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.current_model_id = None
+        self.thread = None
+        self.worker = None
         self._setup_ui()
         self.refresh_tree()
 
@@ -167,13 +214,16 @@ class SNPoolTab(QWidget):
         self.table = QTableWidget()
         self.table.setColumnCount(4)
         self.table.setHorizontalHeaderLabels(['ID', 'Серийный номер (SN)', 'Статус', 'Привязанный проект (Устройство)'])
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        hdr = self.table.horizontalHeader()
+        hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents) # ID
+        hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)          # SN
+        hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents) # Статус
+        hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)          # Проект/Устройство
+        
         self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         right_layout.addWidget(self.table)
 
         splitter.addWidget(right_panel)
@@ -321,47 +371,63 @@ class SNPoolTab(QWidget):
                 QMessageBox.critical(self, "Ошибка", f"Ошибка сохранения: {e}")
 
     def _load_table_for_model(self, model_id: int) -> None:
+        """Переход к асинхронной загрузке таблицы."""
+        # Проверка, не запущен ли уже поток
+        if hasattr(self, 'thread') and self.thread is not None:
+            try:
+                if self.thread.isRunning():
+                    return
+            except RuntimeError:
+                # Объект потока был удален на стороне C++, сбрасываем ссылку
+                self.thread = None
+
+        self.table.setRowCount(1)
+        self.table.setItem(0, 1, QTableWidgetItem("⏳ Загрузка..."))
+        
+        self.thread = QThread()
+        self.worker = SNPoolLoadWorker(model_id)
+        self.worker.moveToThread(self.thread)
+
+        self.thread.started.connect(self.worker.run)
+        self.worker.finished.connect(self._on_table_loaded)
+        self.worker.error.connect(self._on_load_error)
+        
+        # Очистка потока после завершения
+        self.worker.finished.connect(self.thread.quit)
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.thread.finished.connect(self.thread.deleteLater)
+        self.thread.finished.connect(lambda: setattr(self, 'thread', None))
+
+        self.thread.start()
+
+    def _on_table_loaded(self, records_data: list) -> None:
+        """Отрисовка полученных данных пула."""
+        self.table.setRowCount(len(records_data))
+
+        for row, rec in enumerate(records_data):
+            item_id = QTableWidgetItem(str(rec['id']))
+            item_sn = QTableWidgetItem(rec['sn'])
+            item_status = QTableWidgetItem(rec['status_str'])
+            
+            if rec['status_color'] == 'darkYellow':
+                item_status.setForeground(Qt.GlobalColor.darkYellow)
+            
+            item_device = QTableWidgetItem(rec['device_str'])
+
+            item_id.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            item_status.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+
+            self.table.setItem(row, 0, item_id)
+            self.table.setItem(row, 1, item_sn)
+            self.table.setItem(row, 2, item_status)
+            self.table.setItem(row, 3, item_device)
+
+        # Применим текстовый фильтр
+        self._filter_table(self.search_input.text())
+
+    def _on_load_error(self, error_msg: str) -> None:
+        print(f"Ошибка загрузки таблицы пула: {error_msg}")
         self.table.setRowCount(0)
-        try:
-            session = get_session()
-            query = session.query(SerialNumber).filter(SerialNumber.model_id == model_id).order_by(SerialNumber.created_at.desc())
-
-            records = query.all()
-            self.table.setRowCount(len(records))
-
-            for row, rec in enumerate(records):
-                item_id = QTableWidgetItem(str(rec.id))
-                item_sn = QTableWidgetItem(rec.sn)
-                
-                if rec.device_id is None and rec.is_used:
-                    status_str = '⚙ Сдвиг счетчика (Якорь)'
-                    item_status = QTableWidgetItem(status_str)
-                    item_status.setForeground(Qt.GlobalColor.darkYellow)
-                    device_str = '—'
-                else:
-                    status_str = '🔴 Использован' if rec.is_used else '🟢 Свободен'
-                    item_status = QTableWidgetItem(status_str)
-                    
-                    device_str = '—'
-                    if rec.device:
-                        proj = rec.device.project
-                        device_str = f"💻 {rec.device.name} (📁 {proj.name if proj else 'Без проекта'})"
-                
-                item_device = QTableWidgetItem(device_str)
-
-                item_id.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                item_status.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-
-                self.table.setItem(row, 0, item_id)
-                self.table.setItem(row, 1, item_sn)
-                self.table.setItem(row, 2, item_status)
-                self.table.setItem(row, 3, item_device)
-
-            session.close()
-            # Применим текстовый фильтр
-            self._filter_table(self.search_input.text())
-        except Exception as e:
-            print(f"Ошибка загрузки таблицы пула: {e}")
 
     def _filter_table(self, text: str) -> None:
         text = text.lower().strip()

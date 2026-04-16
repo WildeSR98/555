@@ -14,7 +14,7 @@ router = APIRouter()
 
 
 @router.get("/")
-async def get_analytics_summary(db: Session = Depends(get_db)):
+def get_analytics_summary(db: Session = Depends(get_db)):
     """Общая сводка аналитики."""
     # Устройства по статусам
     device_status = db.query(
@@ -61,7 +61,7 @@ async def get_analytics_summary(db: Session = Depends(get_db)):
 
 
 @router.get("/employee")
-async def get_employee_analytics(
+def get_employee_analytics(
     user_id: int = Query(...),
     period: str = Query("all"),
     db: Session = Depends(get_db)
@@ -77,7 +77,13 @@ async def get_employee_analytics(
     elif period == "month":
         cutoff = now - timedelta(days=30)
         
-    query = db.query(WorkLog).filter(WorkLog.worker_id == user_id)
+    from sqlalchemy.orm import joinedload
+    query = db.query(WorkLog).options(
+        joinedload(WorkLog.device),
+        joinedload(WorkLog.project),
+        joinedload(WorkLog.workplace)
+    ).filter(WorkLog.worker_id == user_id)
+    
     if cutoff:
         query = query.filter(WorkLog.created_at >= cutoff)
         

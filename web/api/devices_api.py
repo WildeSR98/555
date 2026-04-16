@@ -13,14 +13,22 @@ router = APIRouter()
 
 
 @router.get("/search")
-async def search_device(sn: str = Query(...), db: Session = Depends(get_db)):
+def search_device(sn: str = Query(...), db: Session = Depends(get_db)):
     """Поиск устройства по SN и возврат его истории логов."""
-    # Ищем точное совпадение
-    device = db.query(Device).filter(Device.serial_number == sn).first()
+    from sqlalchemy.orm import joinedload
+    
+    # Ищем точное совпадение (сразу грузим проект и воркера)
+    device = db.query(Device).options(
+        joinedload(Device.project),
+        joinedload(Device.current_worker)
+    ).filter(Device.serial_number == sn).first()
     
     # Если не нашли, ищем частичное
     if not device:
-        device = db.query(Device).filter(Device.serial_number.contains(sn)).first()
+        device = db.query(Device).options(
+            joinedload(Device.project),
+            joinedload(Device.current_worker)
+        ).filter(Device.serial_number.contains(sn)).first()
         
     if not device:
         raise HTTPException(404, f"Устройство с SN '{sn}' не найдено")
@@ -43,7 +51,10 @@ async def search_device(sn: str = Query(...), db: Session = Depends(get_db)):
     }
 
     # Подгружаем историю (WorkLog)
-    logs = db.query(WorkLog).filter(
+    logs = db.query(WorkLog).options(
+        joinedload(WorkLog.workplace),
+        joinedload(WorkLog.worker)
+    ).filter(
         WorkLog.device_id == device.id
     ).order_by(WorkLog.created_at.desc()).all()
 

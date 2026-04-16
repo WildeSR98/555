@@ -11,43 +11,53 @@ API эндпоинты для Scan — производственный проц
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
-from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime
+from pydantic import BaseModel, Field, field_validator
+import re
 
 from src.database import get_db
 from src.models import Workplace, WorkSession, WorkLog, Device, User, Project
 from src.logic.workflow import WorkflowEngine
+from web.dependencies import get_current_user
 
 router = APIRouter()
 
 
 class StartSessionRequest(BaseModel):
-    workplace_id: int
-    worker_code: str
+    workplace_id: int = Field(..., gt=0)
+    worker_code: str = Field(..., min_length=2, max_length=50)
+
+    @field_validator('worker_code')
+    @classmethod
+    def validate_worker_code(cls, v):
+        if not re.match(r'^[a-zA-Z0-9_\-]+$', v):
+            raise ValueError('worker_code must be alphanumeric (plus _ or -)')
+        return v
 
 
 class ProcessBatchRequest(BaseModel):
-    session_id: int
-    workplace_id: int
-    worker_id: int
-    serial_numbers: List[str]
+    session_id: int = Field(..., gt=0)
+    workplace_id: int = Field(..., gt=0)
+    worker_id: int = Field(..., gt=0)
+    serial_numbers: List[str] = Field(..., min_length=1, max_length=100)
     verified_project_ids: Optional[List[int]] = []
 
+
 class ActionRequest(BaseModel):
-    session_id: int
-    workplace_id: int
-    worker_id: int
-    device_ids: List[int]
-    action: str  # complete, defect, keep, semifinished
+    session_id: int = Field(..., gt=0)
+    workplace_id: int = Field(..., gt=0)
+    worker_id: int = Field(..., gt=0)
+    device_ids: List[int] = Field(..., min_length=1, max_length=100)
+    action: str = Field(..., pattern='^(complete|defect|keep|semifinished|scan_in)$')
 
 
 class EndSessionRequest(BaseModel):
-    session_id: int
+    session_id: int = Field(..., gt=0)
 
 
 @router.get("/workplaces")
-async def get_workplaces(db: Session = Depends(get_db)):
+def get_workplaces(db: Session = Depends(get_db)):
     """Список активных рабочих мест."""
     workplaces = db.query(Workplace).filter(
         Workplace.is_active == True
@@ -65,7 +75,7 @@ async def get_workplaces(db: Session = Depends(get_db)):
 
 
 @router.post("/start-session")
-async def start_session(data: StartSessionRequest, db: Session = Depends(get_db)):
+def start_session(data: StartSessionRequest, db: Session = Depends(get_db)):
     """Шаг 1: Выбрать рабочее место + отсканировать QR работника."""
     # Найти работника
     worker = db.query(User).filter(
@@ -111,7 +121,11 @@ async def start_session(data: StartSessionRequest, db: Session = Depends(get_db)
 
 
 @router.post("/process-batch")
-async def process_batch(data: ProcessBatchRequest, db: Session = Depends(get_db)):
+def process_batch(
+    data: ProcessBatchRequest, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     """Шаг 2: Обработка пакета SN — валидация и приём в работу."""
     try:
         workplace = db.query(Workplace).get(data.workplace_id)
@@ -126,8 +140,10 @@ async def process_batch(data: ProcessBatchRequest, db: Session = Depends(get_db)
         to_scan_in = []
         already_in = []
 
+        from sqlalchemy.orm import joinedload
         for sn in data.serial_numbers:
-            device = db.query(Device).filter(Device.serial_number == sn).first()
+            # Оптимизация: загружаем проект и спеку сразу
+            device = db.query(Device).options(joinedload(Device.project)).filter(Device.serial_number == sn).first()
             if not device:
                 return {
                     "ok": False,
@@ -163,53 +179,32 @@ async def process_batch(data: ProcessBatchRequest, db: Session = Depends(get_db)
                         "spec_code": device.project.spec_code
                     }
 
+            # 1. Валидация по логике Workflow (можно ли принять этот SN на этот пост)
+            ok, msg = WorkflowEngine.can_accept_device(workplace.workplace_type, device.status)
+            if not ok:
+                return {"ok": False, "error": f'{sn}: {msg}'}
+
             valid_devices.append(device)
 
-            # Определяем: нужно принять в работу или уже на этом этапе
-            # Если статус None, считаем что нужно принять в работу
+            # Определяем: нужно принять в работу или уже принят
             status = device.status or ""
             if status.startswith('WAITING_') or status != workplace.workplace_type:
                 to_scan_in.append(device)
             else:
                 already_in.append(device)
 
-        # Если есть устройства для приёма в работу — делаем SCAN_IN
-        scan_in_results = []
-        if to_scan_in:
-            for device in to_scan_in:
-                old_status = device.status
-                device.status = workplace.workplace_type
-                device.current_worker_id = data.worker_id
-                device.updated_at = datetime.now()
-
-                log = WorkLog(
-                    worker_id=data.worker_id,
-                    session_id=data.session_id,
-                    workplace_id=data.workplace_id,
-                    device_id=device.id,
-                    project_id=device.project_id,
-                    action='SCAN_IN',
-                    old_status=old_status,
-                    new_status=device.status,
-                    part_number=device.part_number or '',
-                    serial_number=device.serial_number or '',
-                    created_at=datetime.now(),
-                )
-                db.add(log)
-                scan_in_results.append({"sn": device.serial_number, "action": "SCAN_IN"})
-            db.commit()
-
+        # process-batch только ВАЛИДИРУЕТ. SCAN_IN делается отдельным шагом через action=scan_in.
         return {
             "ok": True,
-            "scan_in_count": len(to_scan_in),
+            "need_scan_in": len(to_scan_in) > 0,
             "already_in_count": len(already_in),
-            "scan_in_results": scan_in_results,
             "device_ids": [d.id for d in valid_devices],
             "devices": [
-                {"id": d.id, "sn": d.serial_number, "name": d.name, "status": d.status}
+                {"id": d.id, "sn": d.serial_number, "name": d.name, "status": d.status,
+                 "need_scan_in": d in to_scan_in}
                 for d in valid_devices
             ],
-            "need_action": len(already_in) > 0,
+            "need_action": len(valid_devices) > 0,
         }
     except Exception as e:
         # Ловим все ошибки и отдаем как 400 чтобы фронт показал текст ошибки
@@ -217,7 +212,11 @@ async def process_batch(data: ProcessBatchRequest, db: Session = Depends(get_db)
 
 
 @router.post("/action")
-async def do_action(data: ActionRequest, db: Session = Depends(get_db)):
+def do_action(
+    data: ActionRequest, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     """Шаг 3: Действие с устройствами (Готово / Брак / Оставить / Полуфабрикат)."""
     STATUS_MAP = {
         'KITTING': 'WAITING_PRE_PRODUCTION',
@@ -245,8 +244,22 @@ async def do_action(data: ActionRequest, db: Session = Depends(get_db)):
 
             old_status = device.status
 
-            if data.action == 'complete':
+            if data.action == 'scan_in':
+                # Явный SCAN_IN: принять устройство в работу на этом посту
+                workplace = db.query(Workplace).get(data.workplace_id)
+                device.status = workplace.workplace_type
+                device.current_worker_id = data.worker_id
+                device.updated_at = datetime.now()
+                action_type = 'SCAN_IN'
+            elif data.action == 'complete':
                 new_status = STATUS_MAP.get(old_status, 'QC_PASSED')
+                
+                # Проверка Workflow
+                last_log = db.query(WorkLog).filter(WorkLog.device_id == device.id).order_by(WorkLog.created_at.desc()).first()
+                ok, msg = WorkflowEngine.can_change_status(device, new_status, current_user, last_log)
+                if not ok:
+                    return {"ok": False, "error": f"{device.serial_number}: {msg}"}
+
                 device.status = new_status
                 device.current_worker_id = None
                 device.updated_at = datetime.now()
@@ -256,8 +269,6 @@ async def do_action(data: ActionRequest, db: Session = Depends(get_db)):
                 device.current_worker_id = None
                 device.updated_at = datetime.now()
                 action_type = 'DEFECT'
-            elif data.action == 'keep':
-                action_type = 'KEPT'
             elif data.action == 'semifinished':
                 device.is_semifinished = True
                 device.current_worker_id = None
@@ -280,7 +291,7 @@ async def do_action(data: ActionRequest, db: Session = Depends(get_db)):
                 created_at=datetime.now(),
             )
             db.add(log)
-            results.append({"sn": device.serial_number, "action": action_type})
+            results.append({"sn": device.serial_number, "action": action_type, "device_id": device.id, "new_status": device.status})
 
         db.commit()
 
@@ -306,7 +317,7 @@ async def do_action(data: ActionRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/end-session")
-async def end_session(data: EndSessionRequest, db: Session = Depends(get_db)):
+def end_session(data: EndSessionRequest, db: Session = Depends(get_db)):
     """Завершить рабочую сессию."""
     ws = db.query(WorkSession).get(data.session_id)
     if ws:

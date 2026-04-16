@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QDialog,
     QLineEdit, QComboBox, QFormLayout, QMessageBox, QFrame
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
 from PyQt6.QtGui import QFont, QColor
 from datetime import datetime
 
@@ -17,10 +17,11 @@ from ..models import User
 from .styles import COLORS
 
 ROLE_CHOICES = [
-    ('WORKER', 'Работник производства'),
-    ('EMPLOYEE', 'Сотрудник'),
-    ('MANAGER', 'Менеджер'),
-    ('ADMIN', 'Администратор'),
+    (User.ROLE_WORKER, 'Работник производства'),
+    (User.ROLE_EMPLOYEE, 'Сотрудник'),
+    (User.ROLE_SHOP_MANAGER, 'Начальник цеха'),
+    (User.ROLE_MANAGER, 'Менеджер'),
+    (User.ROLE_ADMIN, 'Администратор'),
 ]
 
 DIALOG_STYLE = f"""
@@ -43,6 +44,32 @@ DIALOG_STYLE = f"""
         min-height: 20px;
     }}
 """
+
+
+class AdminLoadWorker(QObject):
+    """Рабочий для фоновой загрузки списка пользователей."""
+    finished = pyqtSignal(list)
+    error = pyqtSignal(str)
+
+    def run(self):
+        try:
+            session = get_session()
+            users = session.query(User).order_by(User.id).all()
+            
+            data = []
+            for u in users:
+                data.append({
+                    'id': u.id,
+                    'username': u.username,
+                    'full_name': f"{u.first_name or ''} {u.last_name or ''}".strip() or '—',
+                    'role_display': u.role_display,
+                    'is_active': u.is_active
+                })
+            
+            session.close()
+            self.finished.emit(data)
+        except Exception as e:
+            self.error.emit(str(e))
 
 
 class AddUserDialog(QDialog):
@@ -220,6 +247,8 @@ class AdminPanelTab(QWidget):
     def __init__(self, user, parent=None):
         super().__init__(parent)
         self.user = user
+        self.thread = None
+        self.worker = None
         self._setup_ui()
         self.refresh_data()
 
@@ -261,12 +290,12 @@ class AdminPanelTab(QWidget):
 
         # Растяжение колонок для читаемости
         hdr = self.table.horizontalHeader()
-        hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        hdr.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        hdr.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents) # ID
+        hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)          # Логин
+        hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)          # ФИО
+        hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents) # Роль
+        hdr.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents) # Статус
+        hdr.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents) # Действия
 
         self.table.setAlternatingRowColors(True)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -294,84 +323,108 @@ class AdminPanelTab(QWidget):
         layout.addWidget(self.table)
 
     def refresh_data(self):
-        try:
-            session = get_session()
-            users = session.query(User).order_by(User.id).all()
+        """Запуск фоновой загрузки пользователей."""
+        # Проверка, не запущен ли уже поток
+        if hasattr(self, 'thread') and self.thread is not None:
+            try:
+                if self.thread.isRunning():
+                    return
+            except RuntimeError:
+                # Объект потока был удален на стороне C++, сбрасываем ссылку
+                self.thread = None
 
-            self.table.setRowCount(len(users))
+        self.thread = QThread()
+        self.worker = AdminLoadWorker()
+        self.worker.moveToThread(self.thread)
 
-            for i, u in enumerate(users):
-                # ID
-                id_item = QTableWidgetItem(str(u.id))
-                id_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                self.table.setItem(i, 0, id_item)
+        self.thread.started.connect(self.worker.run)
+        self.worker.finished.connect(self._on_data_loaded)
+        self.worker.error.connect(self._on_load_error)
+        
+        # Очистка потока после завершения
+        self.worker.finished.connect(self.thread.quit)
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.thread.finished.connect(self.thread.deleteLater)
+        self.thread.finished.connect(lambda: setattr(self, 'thread', None))
 
-                # Логин
-                self.table.setItem(i, 1, QTableWidgetItem(u.username))
+        self.thread.start()
 
-                # ФИО
-                self.table.setItem(i, 2, QTableWidgetItem(f"{u.first_name or ''} {u.last_name or ''}".strip() or '—'))
+    def _on_data_loaded(self, users_data: list):
+        """Отрисовка полученных данных пользователей."""
+        self.table.setRowCount(len(users_data))
 
-                # Роль
-                self.table.setItem(i, 3, QTableWidgetItem(u.role_display))
+        for i, u in enumerate(users_data):
+            # ID
+            id_item = QTableWidgetItem(str(u['id']))
+            id_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.table.setItem(i, 0, id_item)
 
-                # Статус — цветной виджет
-                status_widget = QWidget()
-                sl = QHBoxLayout(status_widget)
-                sl.setContentsMargins(8, 2, 8, 2)
-                status_lbl = QLabel()
-                if u.is_active:
-                    status_lbl.setText('Активен')
-                    status_lbl.setStyleSheet(f"""
-                        background-color: {COLORS['success']};
-                        color: white; border-radius: 4px;
-                        padding: 4px 10px; font-weight: bold; font-size: 11px;
-                    """)
-                else:
-                    status_lbl.setText('Заблокирован')
-                    status_lbl.setStyleSheet(f"""
-                        background-color: {COLORS['error']};
-                        color: white; border-radius: 4px;
-                        padding: 4px 10px; font-weight: bold; font-size: 11px;
-                    """)
-                sl.addWidget(status_lbl)
-                self.table.setCellWidget(i, 4, status_widget)
+            # Логин
+            self.table.setItem(i, 1, QTableWidgetItem(u['username']))
 
-                # Кнопки действий
-                actions_widget = QWidget()
-                al = QHBoxLayout(actions_widget)
-                al.setContentsMargins(4, 2, 4, 2)
-                al.setSpacing(6)
+            # ФИО
+            self.table.setItem(i, 2, QTableWidgetItem(u['full_name']))
 
-                btn_edit = QPushButton('Изменить')
-                btn_edit.setMinimumHeight(26)
-                btn_edit.setStyleSheet(f"""
-                    background-color: {COLORS['accent']};
-                    color: white; border-radius: 4px; border: none;
-                    padding: 4px 12px; font-size: 11px; font-weight: bold;
+            # Роль
+            self.table.setItem(i, 3, QTableWidgetItem(u['role_display']))
+
+            # Статус — цветной виджет
+            status_widget = QWidget()
+            sl = QHBoxLayout(status_widget)
+            sl.setContentsMargins(8, 2, 8, 2)
+            status_lbl = QLabel()
+            if u['is_active']:
+                status_lbl.setText('Активен')
+                status_lbl.setStyleSheet(f"""
+                    background-color: {COLORS['success']};
+                    color: white; border-radius: 4px;
+                    padding: 4px 10px; font-weight: bold; font-size: 11px;
                 """)
-                btn_edit.clicked.connect(lambda checked, uid=u.id: self._edit_user(uid))
-                al.addWidget(btn_edit)
-
-                toggle_text = 'Заблокировать' if u.is_active else 'Разблокировать'
-                toggle_color = COLORS['error'] if u.is_active else COLORS['success']
-                btn_toggle = QPushButton(toggle_text)
-                btn_toggle.setMinimumHeight(26)
-                btn_toggle.setStyleSheet(f"""
-                    background-color: {toggle_color};
-                    color: white; border-radius: 4px; border: none;
-                    padding: 4px 12px; font-size: 11px; font-weight: bold;
+            else:
+                status_lbl.setText('Заблокирован')
+                status_lbl.setStyleSheet(f"""
+                    background-color: {COLORS['error']};
+                    color: white; border-radius: 4px;
+                    padding: 4px 10px; font-weight: bold; font-size: 11px;
                 """)
-                btn_toggle.clicked.connect(lambda checked, uid=u.id: self._toggle_active(uid))
-                al.addWidget(btn_toggle)
+            sl.addWidget(status_lbl)
+            self.table.setCellWidget(i, 4, status_widget)
 
-                self.table.setCellWidget(i, 5, actions_widget)
+            # Кнопки действий
+            actions_widget = QWidget()
+            al = QHBoxLayout(actions_widget)
+            al.setContentsMargins(4, 2, 4, 2)
+            al.setSpacing(6)
 
-            # Высота строк
-            self.table.resizeRowsToContents()
-            session.close()
-        except Exception as e:
-            print(f"AdminPanel error: {e}")
+            btn_edit = QPushButton('Изменить')
+            btn_edit.setMinimumHeight(26)
+            btn_edit.setStyleSheet(f"""
+                background-color: {COLORS['accent']};
+                color: white; border-radius: 4px; border: none;
+                padding: 4px 12px; font-size: 11px; font-weight: bold;
+            """)
+            btn_edit.clicked.connect(lambda checked, uid=u['id']: self._edit_user(uid))
+            al.addWidget(btn_edit)
+
+            toggle_text = 'Заблокировать' if u['is_active'] else 'Разблокировать'
+            toggle_color = COLORS['error'] if u['is_active'] else COLORS['success']
+            btn_toggle = QPushButton(toggle_text)
+            btn_toggle.setMinimumHeight(26)
+            btn_toggle.setStyleSheet(f"""
+                background-color: {toggle_color};
+                color: white; border-radius: 4px; border: none;
+                padding: 4px 12px; font-size: 11px; font-weight: bold;
+            """)
+            btn_toggle.clicked.connect(lambda checked, uid=u['id']: self._toggle_active(uid))
+            al.addWidget(btn_toggle)
+
+            self.table.setCellWidget(i, 5, actions_widget)
+
+        # Высота строк
+        self.table.resizeRowsToContents()
+
+    def _on_load_error(self, error_msg: str):
+        print(f"AdminPanel error: {error_msg}")
 
     def _add_user(self):
         dialog = AddUserDialog(self)

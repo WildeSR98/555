@@ -163,11 +163,11 @@ async function loadDevices(status, label) {
 
         tbody.innerHTML = devices.map(d => `
             <tr>
-                <td>${d.name}</td>
-                <td><code>${d.sn || '—'}</code></td>
-                <td>${d.pn || '—'}</td>
-                <td>${d.project}</td>
-                <td>${d.worker}</td>
+                <td>${escapeHTML(d.name)}</td>
+                <td><code>${escapeHTML(d.sn || '—')}</code></td>
+                <td>${escapeHTML(d.pn || '—')}</td>
+                <td>${escapeHTML(d.project)}</td>
+                <td>${escapeHTML(d.worker)}</td>
             </tr>
         `).join('');
 

@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(c:\\Users\\KnyshovDmitry\\.gemini\\antigravity\\brain\\5e96f2ec-7277-4f2a-83cb-f7df215b680f/**)",
+      "Read(a:\\script_pxe\\script_pxe_2.0/**)",
+      "Bash(python *)",
+      "Bash(timeout *)",
+      "Bash(taskkill *)",
+      "Bash(pip show *)"
+    ]
+  },
+  "$version": 3
+}

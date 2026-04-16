@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 from src.database import get_db
 from src.models import User
 from web.routes.auth import get_current_user
+from web.dependencies import render_template
+from fastapi_csrf_protect import CsrfProtect
 from pathlib import Path
 
 router = APIRouter()
@@ -18,7 +20,7 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "web" / "templates"))
 
 
 @router.get("/admin")
-async def admin_page(request: Request, db: Session = Depends(get_db)):
+def admin_page(request: Request, db: Session = Depends(get_db), csrf_protect: CsrfProtect = Depends()):
     """Страница Admin Panel."""
     user = get_current_user(request)
     if not user or user.role != 'ADMIN':
@@ -26,8 +28,7 @@ async def admin_page(request: Request, db: Session = Depends(get_db)):
 
     users = db.query(User).order_by(User.date_joined.desc()).all()
 
-    return templates.TemplateResponse("admin.html", {
-        "request": request,
+    return render_template("admin.html", {
         "user": user,
         "users": users,
-    })
+    }, request, csrf_protect)

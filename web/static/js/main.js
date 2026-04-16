@@ -4,6 +4,24 @@
 
 // Toast Notifications JS
 function showToast(message, type = 'info') {
+    // Format message if it's an object (common for API errors)
+    let displayMessage = message;
+    if (typeof message === 'object' && message !== null) {
+        if (message.detail) {
+            if (Array.isArray(message.detail)) {
+                displayMessage = message.detail.map(d => d.msg || JSON.stringify(d)).join(', ');
+            } else if (typeof message.detail === 'string') {
+                displayMessage = message.detail;
+            } else {
+                displayMessage = JSON.stringify(message.detail);
+            }
+        } else if (message.message) {
+            displayMessage = message.message;
+        } else {
+            displayMessage = JSON.stringify(message);
+        }
+    }
+
     // Check if toast container exists
     let container = document.getElementById('toast-container');
     if (!container) {
@@ -31,7 +49,7 @@ function showToast(message, type = 'info') {
     toast.innerHTML = `
         <div style="display:flex; align-items:center; gap:10px;">
             <span>${icon}</span>
-            <span style="flex:1;">${message}</span>
+            <span style="flex:1;">${escapeHTML(displayMessage)}</span>
             <button onclick="this.parentElement.parentElement.remove()" style="background:none; border:none; color:inherit; cursor:pointer;">✖</button>
         </div>
     `;
@@ -66,9 +84,16 @@ function showToast(message, type = 'info') {
 // Override default window.alert optionally
 const originalAlert = window.alert;
 window.alert = function(message) {
-    if (message.toString().toLowerCase().includes('ошибка')) {
+    let msgStr = '';
+    if (typeof message === 'object' && message !== null) {
+        msgStr = JSON.stringify(message).toLowerCase();
+    } else {
+        msgStr = String(message).toLowerCase();
+    }
+
+    if (msgStr.includes('ошибка') || msgStr.includes('error') || msgStr.includes('invalid') || msgStr.includes('failed')) {
         showToast(message, 'error');
-    } else if (message.toString().toLowerCase().includes('успех') || message.toString().toLowerCase().includes('удалено')) {
+    } else if (msgStr.includes('успех') || msgStr.includes('success') || msgStr.includes('удалено') || msgStr.includes('ok')) {
         showToast(message, 'success');
     } else {
         showToast(message, 'info');
@@ -119,5 +144,63 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
         }
+    }
+
+    // CSRF Global Fetch Handler
+    const originalFetch = window.fetch;
+    window.fetch = async (...args) => {
+        let [resource, config] = args;
+        
+        // Ensure config exists
+        if (!config) config = {};
+        if (!config.headers) config.headers = {};
+
+        const method = (config.method || 'GET').toUpperCase();
+        const safeMethods = ['GET', 'HEAD', 'OPTIONS', 'TRACE'];
+
+        if (!safeMethods.includes(method)) {
+            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+            if (csrfToken) {
+                // If headers is Headers object
+                if (config.headers instanceof Headers) {
+                    config.headers.set('X-CSRF-Token', csrfToken);
+                } else {
+                    config.headers['X-CSRF-Token'] = csrfToken;
+                }
+            }
+        }
+        
+        return originalFetch(resource, config);
+    };
+
+    // Health Monitoring
+    const checkHealth = async () => {
+        const dot = document.getElementById('health-dot');
+        const text = document.getElementById('health-text');
+        if (!dot || !text) return;
+
+        try {
+            const resp = await fetch('/api/health');
+            const data = await resp.json();
+            
+            if (data.overall === 'OK') {
+                dot.style.background = '#10b981'; // Green
+                text.textContent = 'Система: ОК';
+            } else if (data.overall === 'CRITICAL' || data.database === 'ERROR') {
+                dot.style.background = '#ef4444'; // Red
+                text.textContent = 'Система: ОШИБКА';
+            } else if (data.storage === 'LOW_SPACE') {
+                dot.style.background = '#f59e0b'; // Yellow
+                text.textContent = 'Система: МАЛО МЕСТА';
+            }
+        } catch (e) {
+            dot.style.background = '#94a3b8'; // Grey
+            text.textContent = 'Система: НЕВЕРНО';
+        }
+    };
+
+    if (document.getElementById('health-indicator')) {
+        checkHealth();
+        setInterval(checkHealth, 60000); // Раз в минуту
     }
 });

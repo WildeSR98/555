@@ -12,6 +12,8 @@ from sqlalchemy import func
 from src.database import get_db
 from src.models import Device
 from web.routes.auth import get_current_user
+from web.dependencies import render_template
+from fastapi_csrf_protect import CsrfProtect
 from pathlib import Path
 
 router = APIRouter()
@@ -21,7 +23,6 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "web" / "templates"))
 # Основные этапы конвейера (Ожидание + Работа)
 MAIN_STAGES = [
     ('WAITING_KITTING', 'KITTING', 'Комплектовка'),
-    ('WAITING_PRE_PRODUCTION', 'PRE_PRODUCTION', 'Подготовка'),
     ('WAITING_ASSEMBLY', 'ASSEMBLY', 'Сборка'),
     ('WAITING_VIBROSTAND', 'VIBROSTAND', 'Вибростенд'),
     ('WAITING_TECH_CONTROL_1_1', 'TECH_CONTROL_1_1', 'ОТК 1.1'),
@@ -45,7 +46,7 @@ EXTRA_STAGES = [
 
 
 @router.get("/pipeline")
-async def pipeline_page(request: Request, db: Session = Depends(get_db)):
+def pipeline_page(request: Request, db: Session = Depends(get_db), csrf_protect: CsrfProtect = Depends()):
     """Страница Pipeline — карточки этапов."""
     user = get_current_user(request)
     if not user:
@@ -83,10 +84,9 @@ async def pipeline_page(request: Request, db: Session = Depends(get_db)):
             "count": count,
         })
 
-    return templates.TemplateResponse("pipeline.html", {
-        "request": request,
+    return render_template("pipeline.html", {
         "user": user,
         "stages": stages,
         "extras": extras,
         "total": total,
-    })
+    }, request, csrf_protect)

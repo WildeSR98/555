@@ -10,9 +10,10 @@ API эндпоинты для Admin — CRUD пользователей.
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+from pydantic import BaseModel, Field, field_validator
+import re
 
 from src.database import get_db
 from src.models import User, WorkLog
@@ -21,22 +22,29 @@ router = APIRouter()
 
 
 class UserCreate(BaseModel):
-    username: str
-    first_name: str = ""
-    last_name: str = ""
-    password: str
-    role: str = "WORKER"
+    username: str = Field(..., min_length=3, max_length=50)
+    first_name: str = Field("", max_length=150)
+    last_name: str = Field("", max_length=150)
+    password: str = Field(..., min_length=4)
+    role: str = Field("WORKER", pattern='^(ADMIN|MANAGER|SHOP_MANAGER|EMPLOYEE|WORKER)$')
+
+    @field_validator('username')
+    @classmethod
+    def validate_username(cls, v):
+        if not re.match(r'^[a-zA-Z0-9_\-]+$', v):
+            raise ValueError('username must be alphanumeric (plus _ or -)')
+        return v
 
 
 class UserUpdate(BaseModel):
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
-    role: Optional[str] = None
-    new_password: Optional[str] = None
+    first_name: Optional[str] = Field(None, max_length=150)
+    last_name: Optional[str] = Field(None, max_length=150)
+    role: Optional[str] = Field(None, pattern='^(ADMIN|MANAGER|SHOP_MANAGER|EMPLOYEE|WORKER)$')
+    new_password: Optional[str] = Field(None, min_length=4)
 
 
 @router.get("/users")
-async def get_users(db: Session = Depends(get_db)):
+def get_users(db: Session = Depends(get_db)):
     """Получить всех пользователей."""
     users = db.query(User).order_by(User.date_joined.desc()).all()
     
@@ -57,7 +65,7 @@ async def get_users(db: Session = Depends(get_db)):
 
 
 @router.post("/users")
-async def create_user(data: UserCreate, db: Session = Depends(get_db)):
+def create_user(data: UserCreate, db: Session = Depends(get_db)):
     """Создать нового пользователя."""
     if not data.username or not data.password:
         raise HTTPException(400, "Логин и пароль обязательны")
@@ -81,7 +89,7 @@ async def create_user(data: UserCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/users/{user_id}")
-async def update_user(user_id: int, data: UserUpdate, db: Session = Depends(get_db)):
+def update_user(user_id: int, data: UserUpdate, db: Session = Depends(get_db)):
     """Редактировать пользователя."""
     user = db.query(User).get(user_id)
     if not user:
@@ -101,7 +109,7 @@ async def update_user(user_id: int, data: UserUpdate, db: Session = Depends(get_
 
 
 @router.post("/users/{user_id}/toggle-active")
-async def toggle_user_active(user_id: int, db: Session = Depends(get_db)):
+def toggle_user_active(user_id: int, db: Session = Depends(get_db)):
     """Блокировка / Разблокировка пользователя."""
     user = db.query(User).get(user_id)
     if not user:
@@ -115,7 +123,7 @@ async def toggle_user_active(user_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/stats")
-async def get_admin_stats(db: Session = Depends(get_db)):
+def get_admin_stats(db: Session = Depends(get_db)):
     """Получить статистику для админки."""
     total_users = db.query(User).count()
     active_users = db.query(User).filter_by(is_active=True).count()

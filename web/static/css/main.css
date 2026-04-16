@@ -25,6 +25,8 @@
     --shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
     --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
     --radius: 8px;
+    --glass-bg: rgba(255, 255, 255, 0.82);
+    --glass-border: rgba(255, 255, 255, 0.3);
 }
 
 body {
@@ -308,6 +310,12 @@ body {
     color: white;
 }
 
+.badge-outline {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+}
+
 .badge-success {
     background: var(--success);
 }
@@ -485,6 +493,26 @@ body {
     text-align: center;
 }
 
+.btn-block-large {
+    width: 100%;
+    text-align: center;
+    font-size: 1.25rem;
+    padding: 1rem;
+}
+
+.btn-secondary { 
+    background: var(--bg); 
+    color: var(--text); 
+    border: 1px solid var(--border); 
+}
+
+.btn-secondary:hover { 
+    background: #e2e8f0; 
+}
+
+.mt-4 { margin-top: 1.5rem !important; }
+.mb-4 { margin-bottom: 1.5rem !important; }
+
 /* =============================================
    Alerts
    ============================================= */
@@ -606,4 +634,80 @@ code {
     .dev-row {
         flex-direction: column;
     }
+}
+/* =============================================
+   Premium & Glassmorphism UI
+   ============================================= */
+
+.glass-card {
+    background: var(--glass-bg) !important;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--glass-border);
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.glass-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 20px -5px rgba(0, 0, 0, 0.1);
+}
+
+.premium-card {
+    border: none;
+    color: white;
+    overflow: hidden;
+    position: relative;
+    transition: transform 0.3s ease;
+}
+
+.premium-card:hover {
+    transform: scale(1.02);
+}
+
+.stat-icon-glass {
+    font-size: 2.2rem;
+    background: rgba(255, 255, 255, 0.2);
+    width: 60px;
+    height: 60px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 16px;
+    backdrop-filter: blur(4px);
+}
+
+.stat-value-white { 
+    font-size: 2.2rem; 
+    font-weight: 800; 
+    line-height: 1; 
+    margin-bottom: 4px; 
+}
+
+.stat-label-white { 
+    font-size: 0.85rem; 
+    color: rgba(255, 255, 255, 0.9); 
+    font-weight: 500; 
+}
+
+.badge-premium { 
+    padding: 4px 10px; 
+    border-radius: 6px; 
+    font-size: 11px; 
+    font-weight: 700; 
+    white-space: nowrap; 
+}
+
+.premium-table tr td { 
+    padding: 12px 8px; 
+    border-bottom: 1px solid #f8fafc; 
+}
+
+/* Animations */
+@keyframes fadeIn { 
+    from { opacity: 0; transform: translateY(10px); } 
+    to { opacity: 1; transform: translateY(0); } 
+}
+
+.animate-fade-in {
+    animation: fadeIn 0.5s ease-out;
 }

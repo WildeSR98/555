@@ -9,24 +9,23 @@
             <h1>🏭 Production Manager</h1>
             <p>Введите учетные данные для входа</p>
         </div>
-        
+
         {% if error %}
         <div class="alert alert-error">{{ error }}</div>
         {% endif %}
-        
+
         <form method="post" action="/login">
+            <input type="hidden" name="token_key" value="{{ csrf_token }}">
             <div class="form-group">
                 <label for="username">Логин или пинкод</label>
-                <input type="text" id="username" name="username" required 
-                       placeholder="Введите логин..." autofocus>
+                <input type="text" id="username" name="username" required placeholder="Введите логин..." autofocus>
             </div>
-            
+
             <div class="form-group">
                 <label for="password">Пароль</label>
-                <input type="password" id="password" name="password" required 
-                       placeholder="Введите пароль...">
+                <input type="password" id="password" name="password" required placeholder="Введите пароль...">
             </div>
-            
+
             <button type="submit" class="btn btn-primary btn-block">Вход</button>
         </form>
     </div>

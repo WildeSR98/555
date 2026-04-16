@@ -7,14 +7,25 @@ class WorkflowEngine:
 
     # Разрешенные переходы (откуда -> [куда])
     # Если старого статуса нет в списке, переход свободный (например, для начальных этапов)
+    # Разрешенные переходы (статус -> [возможные следующие статусы])
     STRICT_TRANSITIONS = {
+        'WAITING_KITTING': ['WAITING_PRE_PRODUCTION', 'REPAIR', 'DEFECT'],
+        'KITTING': ['WAITING_PRE_PRODUCTION', 'REPAIR', 'DEFECT'],
+        'WAITING_PRE_PRODUCTION': ['PRE_PRODUCTION', 'REPAIR', 'DEFECT'],
+        'PRE_PRODUCTION': ['WAITING_ASSEMBLY', 'REPAIR', 'DEFECT'],
+        'WAITING_ASSEMBLY': ['ASSEMBLY', 'REPAIR', 'DEFECT'],
         'ASSEMBLY': ['WAITING_VIBROSTAND', 'REPAIR', 'DEFECT'],
+        'WAITING_VIBROSTAND': ['VIBROSTAND', 'REPAIR', 'DEFECT'],
         'VIBROSTAND': ['WAITING_TECH_CONTROL_1_1', 'WAITING_TECH_CONTROL_1_2', 'REPAIR', 'DEFECT'],
         'TECH_CONTROL_1_1': ['WAITING_FUNC_CONTROL', 'REPAIR', 'DEFECT'],
         'TECH_CONTROL_1_2': ['WAITING_FUNC_CONTROL', 'REPAIR', 'DEFECT'],
         'FUNC_CONTROL': ['WAITING_TECH_CONTROL_2_1', 'WAITING_TECH_CONTROL_2_2', 'REPAIR', 'DEFECT'],
         'TECH_CONTROL_2_1': ['WAITING_PACKING', 'REPAIR', 'DEFECT'],
         'TECH_CONTROL_2_2': ['WAITING_PACKING', 'REPAIR', 'DEFECT'],
+        'WAITING_PACKING': ['PACKING', 'REPAIR', 'DEFECT'],
+        'PACKING': ['WAITING_ACCOUNTING', 'REPAIR', 'DEFECT'],
+        'WAITING_ACCOUNTING': ['ACCOUNTING', 'REPAIR', 'DEFECT'],
+        'ACCOUNTING': ['WAREHOUSE', 'QC_PASSED', 'REPAIR', 'DEFECT'],
         'REPAIR': [
             'WAITING_VIBROSTAND', 'WAITING_TECH_CONTROL_1_1', 'WAITING_TECH_CONTROL_1_2', 
             'WAITING_PACKING', 'WAITING_ASSEMBLY', 'WAITING_PRE_PRODUCTION'
@@ -34,8 +45,8 @@ class WorkflowEngine:
         Проверка: можно ли перевести устройство в новый статус.
         Возвращает (Успех, Сообщение об ошибке)
         """
-        # 1. Права Начцеха / Админа (Manager/Admin могут всё)
-        if user.role in [User.ROLE_ADMIN, User.ROLE_MANAGER]:
+        # 1. Права Начцеха / Админа / Менеджера (Manager/Admin/ShopManager могут всё)
+        if user.role in [User.ROLE_ADMIN, User.ROLE_MANAGER, User.ROLE_SHOP_MANAGER]:
             return True, ""
 
         # 2. Проверка кулдауна (5 минут)
@@ -68,6 +79,27 @@ class WorkflowEngine:
         return True, ""
 
     @staticmethod
+    def can_accept_device(workplace_type: str, device_status: str) -> Tuple[bool, str]:
+        """
+        Проверка: может ли данный пост принять устройство с текущим статусом.
+        Пример: Пост ASSEMBLY может принять только WAITING_ASSEMBLY.
+        """
+        if workplace_type == 'REPAIR':
+            return True, "" # Ремонт принимает всё
+
+        # Правило: Пост Х принимает устройство, если статус = WAITING_X
+        expected_status = f"WAITING_{workplace_type}"
+        
+        # Исключение для PRE_PRODUCTION (может принимать WAITING_KITTING если KITTING пропущен)
+        if workplace_type == 'PRE_PRODUCTION' and device_status == 'WAITING_KITTING':
+            return True, ""
+
+        if device_status != expected_status and device_status != workplace_type:
+            return False, f"Устройство в статусе {device_status}. Пост {workplace_type} ожидает {expected_status}."
+
+        return True, ""
+
+    @staticmethod
     def is_batch_allowed(workplace_type: str) -> bool:
         """Проверка: разрешен ли пакетный ввод для данного типа поста."""
         # Вибро, Тесты, Упаковка, Склад
@@ -81,6 +113,8 @@ class WorkflowEngine:
     @staticmethod
     def get_batch_limit(workplace_type: str) -> int:
         """Лимит пакетного ввода."""
+        if workplace_type == 'WAREHOUSE':
+            return 100
         if WorkflowEngine.is_batch_allowed(workplace_type):
-            return 3
+            return 10
         return 1
