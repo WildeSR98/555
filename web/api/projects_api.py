@@ -11,7 +11,7 @@ from typing import List, Optional
 from datetime import datetime
 
 from src.database import get_db
-from src.models import Project, Device, Operation, SerialNumber, DeviceModel, User, WorkLog
+from src.models import Project, Device, Operation, SerialNumber, DeviceModel, User, WorkLog, ProjectRoute, RouteConfig
 from web.dependencies import get_current_user
 
 router = APIRouter()
@@ -29,6 +29,7 @@ class ProjectCreateRequest(BaseModel):
     spec_link: Optional[str] = None
     spec_code: Optional[str] = None
     manager_id: Optional[int] = None
+    route_config_id: Optional[int] = None   # Маршрутный лист
     devices: List[DeviceRowInput]
 
 
@@ -225,7 +226,7 @@ async def create_project(
                     part_number=row.part_number,
                     device_type=dm.category,
                     serial_number=new_sn_str,
-                    status='PRE_PRODUCTION',
+                    status='WAITING_KITTING',
                     created_at=datetime.now(),
                     updated_at=datetime.now()
                 )
@@ -242,6 +243,30 @@ async def create_project(
                 db.add(new_sn_record)
                 
         db.commit()
+
+        # Назначить маршрут
+        route_id = data.route_config_id
+        if not route_id:
+            # Автовыбор: находим по типу устройства из первого рова
+            if data.devices:
+                first_dm = db.query(DeviceModel).get(data.devices[0].model_id)
+                if first_dm:
+                    rc = db.query(RouteConfig).filter_by(device_type=first_dm.category).first()
+                    if rc:
+                        route_id = rc.id
+        if not route_id:
+            rc_def = db.query(RouteConfig).filter_by(is_default=True).first()
+            if rc_def:
+                route_id = rc_def.id
+        if route_id:
+            db.add(ProjectRoute(
+                project_id=new_proj.id,
+                route_config_id=route_id,
+                assigned_at=datetime.now(),
+                assigned_by_id=user.id,
+            ))
+            db.commit()
+
         return {"ok": True, "message": f"Проект создан. Сгенерировано устройств: {device_count}"}
         
     except Exception as e:

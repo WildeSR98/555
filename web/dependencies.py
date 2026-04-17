@@ -21,9 +21,20 @@ def get_current_user(request: Request) -> User:
         
         return user
 
+
+async def get_current_user_optional(request: Request, db=None) -> User | None:
+    """Возвращает пользователя или None (без исключения). Используется в HTML-роутах."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return None
+    with get_session() as session:
+        user = session.query(User).filter(User.id == user_id).first()
+        return user if user and user.is_active else None
+
+
 def require_admin(user: User = Depends(get_current_user)):
-    """Проверяет, является ли пользователь администратором (Синхронно)."""
-    if user.role != User.ROLE_ADMIN:
+    """Проверяет, является ли пользователь администратором или root (Синхронно)."""
+    if user.role not in (User.ROLE_ADMIN, User.ROLE_ROOT):
         raise HTTPException(status_code=403, detail="Forbidden: Admin access required")
     return user
 

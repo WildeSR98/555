@@ -33,7 +33,9 @@
             <li><a href="/scan" class="{% if request.url.path == '/scan' %}active{% endif %}">📷 Скан</a></li>
             <li><a href="/devices" class="{% if request.url.path == '/devices' %}active{% endif %}">🔧 Устройства</a></li>
             <li><a href="/sn-pool" class="{% if request.url.path == '/sn-pool' %}active{% endif %}">🏷️ SN Пул</a></li>
-            {% if user.role == 'ADMIN' %}
+            <li><a href="/route-configs" class="{% if request.url.path == '/route-configs' %}active{% endif %}">📋 Маршруты</a></li>
+            <li><a href="/archive" class="{% if request.url.path == '/archive' %}active{% endif %}">📦 Архив</a></li>
+            {% if user.role in ('ADMIN', 'ROOT') %}
             <li><a href="/admin" class="{% if request.url.path == '/admin' %}active{% endif %}">⚙️ Админ</a></li>
             {% endif %}
         </ul>

@@ -1,0 +1,293 @@
+{% extends "base.html" %}
+{% block title %}Маршрутные листы — Production Manager{% endblock %}
+
+{% block extra_css %}
+<style>
+.rc-layout { display: flex; gap: 24px; height: calc(100vh - 120px); }
+.rc-sidebar {
+    width: 300px; min-width: 260px;
+    background: var(--card-bg);
+    border-radius: 12px; padding: 16px;
+    overflow-y: auto; border: 1px solid var(--border);
+}
+.rc-editor {
+    flex: 1; background: var(--card-bg);
+    border-radius: 12px; padding: 24px;
+    overflow-y: auto; border: 1px solid var(--border);
+}
+.rc-item {
+    padding: 10px 12px; border-radius: 8px; cursor: pointer;
+    margin-bottom: 6px; border: 2px solid transparent;
+    transition: all .2s; display: flex; align-items: center; gap: 8px;
+}
+.rc-item:hover { background: rgba(99,102,241,.1); }
+.rc-item.active { border-color: #6366f1; background: rgba(99,102,241,.12); }
+.rc-item-default { border-left: 3px solid #7c3aed; }
+.rc-badge {
+    font-size: 10px; padding: 2px 6px; border-radius: 4px;
+    background: #7c3aed; color: #fff; font-weight: 600;
+}
+.stage-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px; border-radius: 8px; margin-bottom: 6px;
+    background: rgba(255,255,255,.03); border: 1px solid var(--border);
+    transition: opacity .2s;
+}
+.stage-row.disabled-stage { opacity: .45; }
+.stage-num { font-size: 11px; color: var(--text-muted); width: 20px; }
+.stage-name { flex: 1; font-weight: 500; }
+.stage-status { font-size: 12px; color: var(--text-muted); margin-right: 12px; }
+.toggle-switch { position:relative; display:inline-block; width:44px; height:24px; }
+.toggle-switch input { opacity:0; width:0; height:0; }
+.toggle-slider {
+    position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0;
+    background:#4b5563; border-radius:24px; transition:.3s;
+}
+.toggle-switch input:checked + .toggle-slider { background:#6366f1; }
+.toggle-slider:before {
+    content:""; position:absolute; height:18px; width:18px;
+    left:3px; bottom:3px; background:white; border-radius:50%; transition:.3s;
+}
+.toggle-switch input:checked + .toggle-slider:before { transform:translateX(20px); }
+.no-select { color: var(--text-muted); text-align: center; padding: 60px 20px; }
+.editor-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; }
+.editor-meta { font-size:13px; color: var(--text-muted); margin-bottom:20px; }
+.device-type-badge {
+    display: inline-block; font-size: 11px; padding: 2px 8px;
+    border-radius: 4px; background: rgba(99,102,241,.15); color: #6366f1;
+    border: 1px solid rgba(99,102,241,.3);
+}
+.actions-bar { display:flex; gap:10px; margin-top:20px; padding-top:16px; border-top: 1px solid var(--border); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header" style="margin-bottom:20px;">
+    <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+        <div>
+            <h1 style="margin:0;">📋 Маршрутные листы</h1>
+            <p style="margin:4px 0 0; color:var(--text-muted); font-size:14px;">
+                Конфигурации производственного конвейера по типам устройств
+            </p>
+        </div>
+        {% if user.role in ('ADMIN','ROOT','MANAGER') %}
+        <button class="btn btn-primary" onclick="showCreateForm()" style="margin-left:auto;">
+            ➕ Создать маршрут
+        </button>
+        {% endif %}
+    </div>
+</div>
+
+<div class="rc-layout">
+    <!-- ─── Список маршрутов ─── -->
+    <div class="rc-sidebar">
+        <div style="font-size:12px; color:var(--text-muted); margin-bottom:10px; text-transform:uppercase; letter-spacing:.5px;">
+            Маршруты
+        </div>
+        <div id="rcList">
+            <div class="text-muted" style="font-size:13px;">Загрузка...</div>
+        </div>
+    </div>
+
+    <!-- ─── Редактор ─── -->
+    <div class="rc-editor" id="rcEditor">
+        <div class="no-select">
+            <div style="font-size:48px; margin-bottom:12px;">🗂️</div>
+            <p>Выберите маршрут из списка или создайте новый</p>
+        </div>
+    </div>
+</div>
+
+<div id="rc-page-meta"
+     data-can-edit="{{ 'true' if user.role in ('ADMIN','ROOT','MANAGER') else 'false' }}"
+     style="display:none;"></div>
+
+<!-- ─── Модалка создания маршрута ─── -->
+<div class="modal-overlay" id="createModal" style="display:none;">
+    <div class="modal-card" style="max-width:480px; width:100%;">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px;">
+            <h3 style="margin:0;">➕ Новый маршрутный лист</h3>
+            <button onclick="closeModal('createModal')" style="background:none; border:none; cursor:pointer; font-size:20px; color:var(--text-muted);">✕</button>
+        </div>
+        <div class="form-group" style="margin-bottom:14px;">
+            <label>Название <span style="color:red;">*</span></label>
+            <input id="rcName" class="form-control" placeholder="Напр. «Tioga — без ОТК 2»" />
+        </div>
+        <div class="form-group" style="margin-bottom:14px;">
+            <label>Описание</label>
+            <input id="rcDesc" class="form-control" placeholder="Краткое описание" />
+        </div>
+        <div class="form-group" style="margin-bottom:14px;">
+            <label>Тип устройства (авто-привязка)</label>
+            <select id="rcDeviceType" class="form-select">
+                <option value="">— Без привязки —</option>
+                <option value="TIOGA">Tioga</option>
+                <option value="JBOH">JBOH</option>
+                <option value="JBOX">JBOX</option>
+                <option value="SERVAL">Serval</option>
+                <option value="OCTOPUS">Octopus</option>
+                <option value="PC">PC</option>
+                <option value="MONITOR">Monitor</option>
+                <option value="RACK">Rack</option>
+            </select>
+        </div>
+        <p style="font-size:12px; color:var(--text-muted); margin-top:4px;">
+            💡 Маршрут создаётся на основе стандартного (все этапы включены). Затем отредактируйте нужные.
+        </p>
+        <div class="modal-buttons" style="margin-top:20px;">
+            <button class="btn" style="background:var(--border);" onclick="closeModal('createModal')">Отмена</button>
+            <button class="btn btn-primary" onclick="createRoute()">Создать</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let currentConfig = null;
+let allConfigs = [];
+
+async function loadConfigs() {
+    const res = await fetch('/api/route-configs');
+    allConfigs = await res.json();
+    renderList();
+}
+
+function renderList() {
+    const el = document.getElementById('rcList');
+    if (!allConfigs.length) { el.innerHTML = '<div class="text-muted" style="font-size:13px;">Маршруты не найдены</div>'; return; }
+    el.innerHTML = allConfigs.map(rc => `
+        <div class="rc-item ${rc.is_default ? 'rc-item-default' : ''} ${currentConfig?.id === rc.id ? 'active' : ''}"
+             onclick="selectConfig(${rc.id})">
+            <div style="flex:1; min-width:0;">
+                <div style="font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${rc.name}</div>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">
+                    ${rc.device_type ? `<span class="device-type-badge">${rc.device_type}</span>` : ''}
+                    ${rc.is_default ? '<span class="rc-badge">Стандартный</span>' : ''}
+                </div>
+            </div>
+        </div>
+    `).join('');
+}
+
+async function selectConfig(id) {
+    const res = await fetch(`/api/route-configs/${id}`);
+    currentConfig = await res.json();
+    renderEditor();
+}
+
+function renderEditor() {
+    const rc = currentConfig;
+    const canEdit = document.getElementById('rc-page-meta').dataset.canEdit === 'true';
+    const isDefault = rc.is_default;
+
+    document.getElementById('rcEditor').innerHTML = `
+        <div class="editor-header">
+            <div>
+                <h2 style="margin:0; font-size:20px;">${rc.name}</h2>
+                <div style="margin-top:4px;">
+                    ${rc.device_type ? `<span class="device-type-badge">📦 ${rc.device_type}</span>` : ''}
+                    ${rc.is_default ? `<span class="rc-badge" style="background:#7c3aed; margin-left:6px;">Стандартный</span>` : ''}
+                </div>
+            </div>
+            ${canEdit && !isDefault ? `<button class="btn btn-sm btn-danger" onclick="deleteConfig(${rc.id})">🗑 Удалить</button>` : ''}
+        </div>
+        <div class="editor-meta">
+            ${rc.description ? `<p style="margin:0 0 8px;">${rc.description}</p>` : ''}
+            ${isDefault ? `<div style="color:#7c3aed; font-size:12px;">⚠️ Дефолтный маршрут — только для просмотра</div>` : ''}
+        </div>
+
+        <div id="stagesList">
+            ${rc.stages.map(s => `
+            <div class="stage-row ${!s.is_enabled ? 'disabled-stage' : ''}" id="stage_${s.stage_key}">
+                <span class="stage-num">${s.order_index}.</span>
+                <span class="stage-name">${s.label}</span>
+                <span class="stage-status">${s.is_enabled ? '● Активен' : '○ Пропуск'}</span>
+                ${canEdit && !isDefault ? `
+                <label class="toggle-switch">
+                    <input type="checkbox" ${s.is_enabled ? 'checked' : ''}
+                           onchange="toggleStage('${s.stage_key}', this.checked)">
+                    <span class="toggle-slider"></span>
+                </label>` : ''}
+            </div>`).join('')}
+        </div>
+
+        ${canEdit && !isDefault ? `
+        <div class="actions-bar">
+            <button class="btn btn-primary" onclick="saveConfig()">💾 Сохранить</button>
+            <span id="savemsg" style="font-size:13px; color:#22c55e; display:none;">✓ Сохранено</span>
+        </div>` : ''}
+    `;
+    renderList();
+}
+
+function toggleStage(key, enabled) {
+    const s = currentConfig.stages.find(x => x.stage_key === key);
+    if (s) {
+        s.is_enabled = enabled;
+        const row = document.getElementById(`stage_${key}`);
+        if (row) {
+            row.classList.toggle('disabled-stage', !enabled);
+            row.querySelector('.stage-status').textContent = enabled ? '● Активен' : '○ Пропуск';
+        }
+    }
+}
+
+async function saveConfig() {
+    const stages = currentConfig.stages.map(s => ({stage_key: s.stage_key, is_enabled: s.is_enabled}));
+    const res = await fetch(`/api/route-configs/${currentConfig.id}`, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({stages})
+    });
+    const data = await res.json();
+    if (res.ok) {
+        const msg = document.getElementById('savemsg');
+        msg.style.display = 'inline';
+        setTimeout(() => msg.style.display = 'none', 3000);
+    } else {
+        alert(data.detail || 'Ошибка сохранения');
+    }
+}
+
+function showCreateForm() { document.getElementById('createModal').style.display = 'flex'; }
+function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+
+async function createRoute() {
+    const name = document.getElementById('rcName').value.trim();
+    if (!name) { alert('Введите название маршрута'); return; }
+    const res = await fetch('/api/route-configs', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            name,
+            description: document.getElementById('rcDesc').value.trim(),
+            device_type: document.getElementById('rcDeviceType').value || null
+        })
+    });
+    const data = await res.json();
+    if (res.ok) {
+        closeModal('createModal');
+        await loadConfigs();
+        selectConfig(data.id);
+    } else {
+        alert(data.detail || 'Ошибка создания');
+    }
+}
+
+async function deleteConfig(id) {
+    if (!confirm('Удалить этот маршрут?')) return;
+    const res = await fetch(`/api/route-configs/${id}`, {method: 'DELETE'});
+    const data = await res.json();
+    if (res.ok) {
+        currentConfig = null;
+        document.getElementById('rcEditor').innerHTML = `<div class="no-select"><div style="font-size:48px;">🗂️</div><p>Маршрут удалён</p></div>`;
+        await loadConfigs();
+    } else {
+        alert(data.detail || 'Ошибка удаления');
+    }
+}
+
+loadConfigs();
+</script>
+{% endblock %}

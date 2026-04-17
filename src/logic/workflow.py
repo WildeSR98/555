@@ -8,27 +8,36 @@ class WorkflowEngine:
     # Разрешенные переходы (откуда -> [куда])
     # Если старого статуса нет в списке, переход свободный (например, для начальных этапов)
     # Разрешенные переходы (статус -> [возможные следующие статусы])
+    # Некоторые workplace_type используют нестандартные входные статусы устройств
+    WORKPLACE_ENTRY_STATUS = {
+        'PRE_PRODUCTION': 'WAITING_KITTING',   # пост Комплектовки принимает WAITING_KITTING
+        'KITTING':        'WAITING_KITTING',
+    }
+
     STRICT_TRANSITIONS = {
-        'WAITING_KITTING': ['WAITING_PRE_PRODUCTION', 'REPAIR', 'DEFECT'],
-        'KITTING': ['WAITING_PRE_PRODUCTION', 'REPAIR', 'DEFECT'],
-        'WAITING_PRE_PRODUCTION': ['PRE_PRODUCTION', 'REPAIR', 'DEFECT'],
-        'PRE_PRODUCTION': ['WAITING_ASSEMBLY', 'REPAIR', 'DEFECT'],
+        'WAITING_KITTING': ['PRE_PRODUCTION', 'KITTING', 'REPAIR', 'DEFECT'],
+        'KITTING': ['WAITING_ASSEMBLY', 'REPAIR', 'DEFECT'],
         'WAITING_ASSEMBLY': ['ASSEMBLY', 'REPAIR', 'DEFECT'],
         'ASSEMBLY': ['WAITING_VIBROSTAND', 'REPAIR', 'DEFECT'],
         'WAITING_VIBROSTAND': ['VIBROSTAND', 'REPAIR', 'DEFECT'],
         'VIBROSTAND': ['WAITING_TECH_CONTROL_1_1', 'WAITING_TECH_CONTROL_1_2', 'REPAIR', 'DEFECT'],
-        'TECH_CONTROL_1_1': ['WAITING_FUNC_CONTROL', 'REPAIR', 'DEFECT'],
+        'TECH_CONTROL_1_1': ['WAITING_TECH_CONTROL_1_2', 'REPAIR', 'DEFECT'],
+        'PRE_PRODUCTION': ['WAITING_ASSEMBLY', 'REPAIR', 'DEFECT'],
         'TECH_CONTROL_1_2': ['WAITING_FUNC_CONTROL', 'REPAIR', 'DEFECT'],
         'FUNC_CONTROL': ['WAITING_TECH_CONTROL_2_1', 'WAITING_TECH_CONTROL_2_2', 'REPAIR', 'DEFECT'],
-        'TECH_CONTROL_2_1': ['WAITING_PACKING', 'REPAIR', 'DEFECT'],
+        'TECH_CONTROL_2_1': ['WAITING_TECH_CONTROL_2_2', 'REPAIR', 'DEFECT'],
         'TECH_CONTROL_2_2': ['WAITING_PACKING', 'REPAIR', 'DEFECT'],
         'WAITING_PACKING': ['PACKING', 'REPAIR', 'DEFECT'],
         'PACKING': ['WAITING_ACCOUNTING', 'REPAIR', 'DEFECT'],
         'WAITING_ACCOUNTING': ['ACCOUNTING', 'REPAIR', 'DEFECT'],
-        'ACCOUNTING': ['WAREHOUSE', 'QC_PASSED', 'REPAIR', 'DEFECT'],
+        'ACCOUNTING': ['WAITING_WAREHOUSE', 'REPAIR', 'DEFECT'],
+        'WAITING_WAREHOUSE': ['WAREHOUSE', 'REPAIR', 'DEFECT'],
+        'WAREHOUSE': ['QC_PASSED', 'REPAIR', 'DEFECT'],
         'REPAIR': [
-            'WAITING_VIBROSTAND', 'WAITING_TECH_CONTROL_1_1', 'WAITING_TECH_CONTROL_1_2', 
-            'WAITING_PACKING', 'WAITING_ASSEMBLY', 'WAITING_PRE_PRODUCTION'
+            'WAITING_KITTING',
+            'WAITING_ASSEMBLY', 'WAITING_VIBROSTAND',
+            'WAITING_TECH_CONTROL_1_1', 'WAITING_TECH_CONTROL_1_2',
+            'WAITING_FUNC_CONTROL',
         ]
     }
 
@@ -39,14 +48,18 @@ class WorkflowEngine:
         device: Device, 
         new_status: str, 
         user: User, 
-        last_log: Optional[WorkLog] = None
+        last_log: Optional[WorkLog] = None,
+        cooldown_bypass_roles: Optional[list] = None,
     ) -> Tuple[bool, str]:
         """
         Проверка: можно ли перевести устройство в новый статус.
         Возвращает (Успех, Сообщение об ошибке)
         """
-        # 1. Права Начцеха / Админа / Менеджера (Manager/Admin/ShopManager могут всё)
-        if user.role in [User.ROLE_ADMIN, User.ROLE_MANAGER, User.ROLE_SHOP_MANAGER]:
+        # 1. Привилегированные роли (обходят кулдаун и жёсткие ограничения)
+        _bypass = cooldown_bypass_roles if cooldown_bypass_roles is not None else [
+            User.ROLE_ADMIN, User.ROLE_MANAGER, User.ROLE_SHOP_MANAGER, User.ROLE_ROOT
+        ]
+        if user.role in _bypass:
             return True, ""
 
         # 2. Проверка кулдауна (5 минут)
@@ -73,7 +86,7 @@ class WorkflowEngine:
              return False, "После сборки устройство должно идти только на Вибростенд."
 
         # После Вибро — только ОТК (или Ремонт/Брак)
-        if old_status == 'VIBROSTAND' and new_status not in ['TECH_CONTROL_1_1', 'TECH_CONTROL_1_2', 'REPAIR', 'DEFECT']:
+        if old_status == 'VIBROSTAND' and new_status not in ['WAITING_TECH_CONTROL_1_1', 'WAITING_TECH_CONTROL_1_2', 'TECH_CONTROL_1_1', 'TECH_CONTROL_1_2', 'REPAIR', 'DEFECT']:
              return False, "После вибростенда устройство должно идти только на Тех. контроль (ОТК)."
 
         return True, ""
@@ -87,15 +100,46 @@ class WorkflowEngine:
         if workplace_type == 'REPAIR':
             return True, "" # Ремонт принимает всё
 
-        # Правило: Пост Х принимает устройство, если статус = WAITING_X
-        expected_status = f"WAITING_{workplace_type}"
-        
-        # Исключение для PRE_PRODUCTION (может принимать WAITING_KITTING если KITTING пропущен)
-        if workplace_type == 'PRE_PRODUCTION' and device_status == 'WAITING_KITTING':
-            return True, ""
+        # Для постов с нестандартным входным статусом используем явный маппинг
+        if workplace_type in WorkflowEngine.WORKPLACE_ENTRY_STATUS:
+            expected_status = WorkflowEngine.WORKPLACE_ENTRY_STATUS[workplace_type]
+        else:
+            # Правило по умолчанию: Пост Х принимает устройство, если статус = WAITING_X
+            expected_status = f"WAITING_{workplace_type}"
 
         if device_status != expected_status and device_status != workplace_type:
-            return False, f"Устройство в статусе {device_status}. Пост {workplace_type} ожидает {expected_status}."
+            from ..models import Device
+            
+            PREV_POST_MAP = {
+                'WAITING_KITTING': 'Задание создано',
+                'WAITING_PRE_PRODUCTION': 'Начальный этап',
+                'WAITING_ASSEMBLY': 'Комплектовка',
+                'WAITING_VIBROSTAND': 'Сборка',
+                'WAITING_TECH_CONTROL_1_1': 'Вибростенд',
+                'WAITING_TECH_CONTROL_1_2': 'Тех. контроль 1.1',
+                'WAITING_FUNC_CONTROL': 'Тех. контроль 1.2',
+                'WAITING_TECH_CONTROL_2_1': 'Функц. контроль',
+                'WAITING_TECH_CONTROL_2_2': 'Тех. контроль 2.1',
+                'WAITING_PACKING': 'Тех. контроль 2.2',
+                'WAITING_ACCOUNTING': 'Упаковка',
+                'WAITING_WAREHOUSE': 'Учёт',
+            }
+            
+            prev_post_name = PREV_POST_MAP.get(expected_status, "Предыдущий этап")
+            status_display = Device.STATUS_DISPLAY.get(device_status, device_status)
+            
+            if device_status in ['DEFECT', 'WAITING_PARTS', 'WAITING_SOFTWARE', 'SHIPPED']:
+                return False, f"Устройство находится в статусе «{status_display}»."
+
+            try:
+                curr_idx = Device.PIPELINE_STAGES.index(device_status)
+                exp_idx = Device.PIPELINE_STAGES.index(expected_status)
+                if curr_idx > exp_idx:
+                    return False, f"Устройство уже прошло этот этап. Текущий статус: «{status_display}»."
+                else:
+                    return False, f"Устройство не прошло пост «{prev_post_name}». Текущий статус: «{status_display}»."
+            except ValueError:
+                return False, f"Ожидается прохождение этапа «{prev_post_name}» (Текущий статус: {status_display})."
 
         return True, ""
 

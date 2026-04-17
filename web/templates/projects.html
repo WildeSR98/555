@@ -16,7 +16,9 @@
             <option value="{{ code }}">{{ name }}</option>
             {% endfor %}
         </select>
-        <button class="btn btn-primary" onclick="loadTree()">⟳ Обновить</button>
+        <button class="btn btn-primary" onclick="loadTree()">&#x27F3; Обновить</button>
+        <a href="/route-configs" class="btn" style="background:rgba(99,102,241,.15); color:#6366f1; border:1px solid rgba(99,102,241,.3);">📋 Маршрутный лист</a>
+        <a href="/archive" class="btn" style="background:rgba(99,102,241,.08); color:var(--text-muted); border:1px solid var(--border);">📦 Архив</a>
         <button class="btn btn-success" onclick="openCreateModal()">➕ Создать</button>
     </div>
 </div>
@@ -95,6 +97,16 @@
             <div id="deviceRows" style="margin-bottom:15px;"></div>
             
             <button type="button" class="btn btn-secondary" onclick="addDeviceRow()">➕ Добавить партномер</button>
+
+            <div style="margin-top:14px; padding:12px; background:rgba(99,102,241,.06); border-radius:8px; border:1px solid rgba(99,102,241,.2);">
+                <label style="font-weight:600; margin-bottom:6px; display:block;">📋 Маршрутный лист
+                    <span style="font-size:11px; font-weight:400; color:var(--text-muted); margin-left:4px;">автовыбор по типу устройства</span>
+                </label>
+                <select id="pRouteConfig" style="width:100%; padding:8px; border-radius:4px; border:1px solid var(--border); background:var(--card-bg); color:var(--text);">
+                    <option value="">— Автовыбор —</option>
+                </select>
+                <div id="routeHint" style="font-size:11px; color:#6366f1; margin-top:4px;"></div>
+            </div>
 
             <div class="modal-buttons" style="margin-top:20px;">
                 <button type="button" class="btn" style="background:var(--border);" onclick="closeModal('createModal')">Отмена</button>
@@ -295,6 +307,7 @@ function openCreateModal() {
     document.getElementById('createForm').reset();
     document.getElementById('deviceRows').innerHTML = '';
     addDeviceRow();
+    loadRouteConfigs();
     document.getElementById('createModal').style.display = 'flex';
 }
 
@@ -325,14 +338,43 @@ function addDeviceRow() {
     container.appendChild(row);
 }
 
+let allRouteConfigs = [];
+
+async function loadRouteConfigs() {
+    try {
+        const r = await fetch('/api/route-configs');
+        allRouteConfigs = await r.json();
+        const sel = document.getElementById('pRouteConfig');
+        sel.innerHTML = '<option value="">— Автовыбор —</option>' +
+            allRouteConfigs.map(rc =>
+                `<option value="${rc.id}" data-dtype="${rc.device_type||''}">${rc.name}${rc.device_type?' ['+rc.device_type+']':''}</option>`
+            ).join('');
+    } catch(e) {}
+}
+
 function updateModels(categorySelect) {
     const category = categorySelect.value;
     const modelSelect = categorySelect.parentElement.querySelector('.dev-model');
     modelSelect.innerHTML = '<option value="" disabled selected>-- Производитель --</option>';
-    
     deviceModels.filter(m => m.category === category).forEach(m => {
         modelSelect.innerHTML += `<option value="${m.id}">${m.name}</option>`;
     });
+    // Автовыбор маршрута по типу
+    autoSelectRoute(category);
+}
+
+function autoSelectRoute(deviceType) {
+    const sel = document.getElementById('pRouteConfig');
+    const hint = document.getElementById('routeHint');
+    const opt = Array.from(sel.options).find(o => o.dataset.dtype === deviceType);
+    if (opt) {
+        sel.value = opt.value;
+        hint.textContent = `✓ Автоматически выбран: ${opt.textContent}`;
+    } else {
+        const defOpt = Array.from(sel.options).find(o => o.dataset.dtype === '');
+        if (defOpt) { sel.value = defOpt.value; hint.textContent = 'ℹ️ Дефолтный маршрут'; }
+        else hint.textContent = '';
+    }
 }
 
 async function submitCreate(e) {
@@ -350,6 +392,7 @@ async function submitCreate(e) {
         spec_link: document.getElementById('pLink').value,
         spec_code: document.getElementById('pSpec').value,
         manager_id: document.getElementById('pManager').value ? parseInt(document.getElementById('pManager').value) : null,
+        route_config_id: document.getElementById('pRouteConfig').value ? parseInt(document.getElementById('pRouteConfig').value) : null,
         devices: rows
     };
     
