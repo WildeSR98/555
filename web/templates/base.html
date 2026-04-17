@@ -44,6 +44,10 @@
             <div id="health-indicator" style="font-size: 11px; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 4px; background: rgba(0,0,0,0.15); color: rgba(255,255,255,0.7);">
                 <span id="health-dot" style="width: 8px; height: 8px; border-radius: 50%; background: #94a3b8;"></span>
                 <span id="health-text">Система: проверка...</span>
+                <span style="margin-left:auto; display:flex; align-items:center; gap:4px;">
+                    <span id="ws-live-dot" class="ws-live ws-connecting" title="WebSocket"></span>
+                    <span style="font-size:10px; opacity:.7;">LIVE</span>
+                </span>
             </div>
             <div class="user-info">
                 <div class="user-name">{{ user.full_name or user.username }}</div>
@@ -65,5 +69,137 @@
     <script src="/static/js/utils.js"></script>
     <script src="/static/js/main.js"></script>
     {% block extra_js %}{% endblock %}
+
+    {% if user %}
+    <!-- ============ WebSocket + Toast ============ -->
+    <div id="ws-toast-container" style="
+        position: fixed; bottom: 20px; right: 20px; z-index: 9999;
+        display: flex; flex-direction: column-reverse; gap: 8px;
+        pointer-events: none; max-width: 340px;
+    "></div>
+
+    <style>
+    .ws-toast {
+        background: var(--card-bg, #1e1e2e);
+        border: 1px solid var(--border, #333);
+        border-radius: 10px;
+        padding: 12px 14px;
+        box-shadow: 0 8px 24px rgba(0,0,0,.35);
+        font-size: 13px;
+        opacity: 0;
+        transform: translateX(40px);
+        transition: opacity .3s, transform .3s;
+        pointer-events: all;
+        cursor: default;
+        min-width: 280px;
+    }
+    .ws-toast.show { opacity: 1; transform: translateX(0); }
+    .ws-toast.hide { opacity: 0; transform: translateX(40px); }
+    .ws-toast-title { font-weight: 700; margin-bottom: 3px; color: var(--primary, #6366f1); }
+    .ws-toast-body  { color: var(--text-muted, #888); line-height: 1.4; }
+    .ws-live {
+        display: inline-block; width: 7px; height: 7px;
+        background: #22c55e; border-radius: 50%;
+        animation: ws-pulse 1.4s ease-in-out infinite;
+    }
+    @keyframes ws-pulse {
+        0%,100% { box-shadow: 0 0 0 0 rgba(34,197,94,.5); }
+        50%      { box-shadow: 0 0 0 5px rgba(34,197,94,0); }
+    }
+    .ws-connecting { background: #f59e0b !important; animation: none; }
+    .ws-offline    { background: #ef4444 !important; animation: none; }
+    @keyframes flash-count {
+        0% { transform: scale(1.3); color: #6366f1; }
+        100% { transform: scale(1); }
+    }
+    .flash-count { animation: flash-count 0.5s ease; }
+    </style>
+
+    <script>
+    (function() {
+        const RECONNECT_DELAY = 3000;
+        const PING_INTERVAL = 25000;
+        let ws = null, pingTimer = null, reconnectTimer = null;
+        const liveDot = document.getElementById('ws-live-dot');
+
+        function setDotState(state) {
+            if (!liveDot) return;
+            liveDot.className = 'ws-live';
+            if (state === 'connecting') liveDot.classList.add('ws-connecting');
+            if (state === 'offline')    liveDot.classList.add('ws-offline');
+        }
+
+        function connect() {
+            setDotState('connecting');
+            const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+            ws = new WebSocket(`${proto}://${location.host}/ws`);
+
+            ws.onopen = () => {
+                setDotState('live');
+                clearTimeout(reconnectTimer);
+                pingTimer = setInterval(() => {
+                    if (ws.readyState === WebSocket.OPEN)
+                        ws.send(JSON.stringify({type: 'ping'}));
+                }, PING_INTERVAL);
+            };
+
+            ws.onmessage = (e) => {
+                let evt;
+                try { evt = JSON.parse(e.data); } catch { return; }
+                if (evt.type === 'pong') return;
+
+                if (evt.type === 'device_status_changed') {
+                    showToast(evt);
+                    // Пробрасываем дальше — каждая страница слушает своё
+                    window.dispatchEvent(new CustomEvent('ws:device_changed', {detail: evt}));
+                }
+            };
+
+            ws.onclose = () => {
+                clearInterval(pingTimer);
+                setDotState('offline');
+                reconnectTimer = setTimeout(connect, RECONNECT_DELAY);
+            };
+
+            ws.onerror = () => ws.close();
+        }
+
+        // ─── Toast ───
+        function showToast(evt) {
+            const container = document.getElementById('ws-toast-container');
+            if (!container) return;
+
+            const actionIcons = {
+                'COMPLETED': '✅', 'DEFECT': '⚠️', 'SCAN_IN': '📥',
+                'MAKE_SEMIFINISHED': '🔧'
+            };
+            const icon = actionIcons[evt.action] || '⚡';
+
+            const toast = document.createElement('div');
+            toast.className = 'ws-toast';
+            toast.innerHTML = `
+                <div class="ws-toast-title">${icon} ${escapeHTML(evt.device_name)} <span style="font-weight:400;font-size:11px;color:var(--text-muted);">${escapeHTML(evt.serial_number)}</span></div>
+                <div class="ws-toast-body">
+                    <span style="color:var(--text);">${escapeHTML(evt.old_status_display)}</span>
+                    <span style="color:#6366f1;"> → </span>
+                    <span style="color:var(--text);font-weight:600;">${escapeHTML(evt.new_status_display)}</span><br>
+                    <span style="font-size:11px;">👤 ${escapeHTML(evt.worker)} · ${escapeHTML(evt.timestamp)}</span>
+                </div>`;
+            container.appendChild(toast);
+
+            // Показать
+            requestAnimationFrame(() => toast.classList.add('show'));
+            // Убрать через 5 сек
+            setTimeout(() => {
+                toast.classList.add('hide');
+                setTimeout(() => toast.remove(), 400);
+            }, 5000);
+        }
+
+        // Запустить при загрузке
+        connect();
+    })();
+    </script>
+    {% endif %}
 </body>
 </html>

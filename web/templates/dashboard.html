@@ -13,7 +13,7 @@
     <div class="stat-card premium-card" style="background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);">
         <div class="stat-icon-glass">🔧</div>
         <div class="stat-info">
-            <div class="stat-value-white">{{ total_devices }}</div>
+            <div class="stat-value-white" id="stat-total-devices">{{ total_devices }}</div>
             <div class="stat-label-white">Всего устройств</div>
         </div>
     </div>
@@ -21,7 +21,7 @@
     <div class="stat-card premium-card" style="background: linear-gradient(135deg, #10b981 0%, #34d399 100%);">
         <div class="stat-icon-glass">✅</div>
         <div class="stat-info">
-            <div class="stat-value-white">{{ completed_today }}</div>
+            <div class="stat-value-white" id="stat-completed-today">{{ completed_today }}</div>
             <div class="stat-label-white">Завершено сегодня</div>
         </div>
     </div>
@@ -29,7 +29,7 @@
     <div class="stat-card premium-card" style="background: linear-gradient(135deg, #f43f5e 0%, #fb7185 100%);">
         <div class="stat-icon-glass">⚠️</div>
         <div class="stat-info">
-            <div class="stat-value-white">{{ defects }}</div>
+            <div class="stat-value-white" id="stat-defects">{{ defects }}</div>
             <div class="stat-label-white">Обнаружен брак</div>
         </div>
     </div>
@@ -37,7 +37,7 @@
     <div class="stat-card premium-card" style="background: linear-gradient(135deg, #0ea5e9 0%, #38bdf8 100%);">
         <div class="stat-icon-glass">⚡</div>
         <div class="stat-info">
-            <div class="stat-value-white">{{ active_sessions_count }}</div>
+            <div class="stat-value-white" id="stat-active-sessions">{{ active_sessions_count }}</div>
             <div class="stat-label-white">Активные сессии</div>
         </div>
     </div>
@@ -58,7 +58,7 @@
             📜 Активность
             <span style="font-size:11px; background:rgba(0,0,0,0.05); padding:2px 8px; border-radius:4px; font-weight:normal;">Последние 8</span>
         </h3>
-        <div class="activity-feed">
+        <div class="activity-feed" id="activity-feed">
             {% for log in recent_logs %}
             <div class="activity-item">
                 <div class="activity-time">{{ log.time }}</div>
@@ -190,4 +190,64 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 });
 </script>
-{% endblock %}
+
+<script>
+// ─── Live-обновление дашборда через WebSocket ───
+const LIVE_STATS_FIELDS = {
+    'total_devices':   'stat-total-devices',
+    'completed_today': 'stat-completed-today',
+    'defects':         'stat-defects',
+    'active_sessions': 'stat-active-sessions',
+};
+
+async function refreshLiveStats() {
+    try {
+        const r = await fetch('/api/dashboard/live-stats');
+        if (!r.ok) return;
+        const data = await r.json();
+        for (const [key, id] of Object.entries(LIVE_STATS_FIELDS)) {
+            const el = document.getElementById(id);
+            if (el && data[key] !== undefined) {
+                el.textContent = data[key];
+                el.classList.add('flash-count');
+                setTimeout(() => el.classList.remove('flash-count'), 600);
+            }
+        }
+    } catch(e) {}
+}
+
+const ACTION_LABELS = {
+    'COMPLETED': 'Готово',
+    'DEFECT': 'Брак',
+    'SCAN_IN': 'Принят в работу',
+    'MAKE_SEMIFINISHED': 'Полуфабрикат',
+};
+
+window.addEventListener('ws:device_changed', (e) => {
+    const evt = e.detail;
+    refreshLiveStats();
+
+    // Препенд в activity feed
+    const feed = document.getElementById('activity-feed');
+    if (!feed) return;
+    const emptyMsg = feed.querySelector('p.text-muted');
+    if (emptyMsg) emptyMsg.remove();
+
+    const item = document.createElement('div');
+    item.className = 'activity-item';
+    item.style.cssText = 'animation: fadeIn .4s ease; border-left: 3px solid #6366f1; padding-left: 8px;';
+    item.innerHTML = `
+        <div class="activity-time">${escapeHTML(evt.timestamp)}</div>
+        <div class="activity-content">
+            <strong>${escapeHTML(evt.worker)}</strong>:
+            ${escapeHTML(ACTION_LABELS[evt.action] || evt.action)} —
+            <code>${escapeHTML(evt.serial_number || evt.device_name)}</code>
+            <div class="activity-meta">→ ${escapeHTML(evt.new_status_display)}</div>
+        </div>`;
+    feed.insertBefore(item, feed.firstChild);
+
+    // Keep max 10 items
+    while (feed.children.length > 10) feed.removeChild(feed.lastChild);
+});
+</script>
+{% endblock %}

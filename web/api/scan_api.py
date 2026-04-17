@@ -19,6 +19,7 @@ from src.models import Workplace, WorkSession, WorkLog, Device, User, Project, P
 from src.logic.workflow import WorkflowEngine
 from src.system_config import get_route_bypass_roles, get_cooldown_bypass_roles
 from web.dependencies import get_current_user
+from web.ws_manager import manager as ws_manager
 
 router = APIRouter()
 
@@ -248,8 +249,8 @@ def process_batch(
 
 
 @router.post("/action")
-def do_action(
-    data: ActionRequest, 
+async def do_action(
+    data: ActionRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -348,9 +349,29 @@ def do_action(
                     created_at=datetime.now(),
                 )
                 db.add(log)
-            results.append({"sn": device.serial_number, "action": action_type, "device_id": device.id, "new_status": device.status})
+            results.append({"sn": device.serial_number, "action": action_type, "device_id": device.id, "new_status": device.status, "old_status": old_status})
 
         db.commit()
+
+        # ─── WebSocket broadcast ───
+        for r in results:
+            dev = db.query(Device).filter(Device.id == r['device_id']).first()
+            if dev:
+                await ws_manager.broadcast({
+                    "type":               "device_status_changed",
+                    "device_id":          dev.id,
+                    "device_name":        dev.name,
+                    "serial_number":      dev.serial_number or "",
+                    "project_id":         dev.project_id,
+                    "project_name":       dev.project.name if dev.project else "",
+                    "old_status":         r.get("old_status", ""),
+                    "new_status":         dev.status,
+                    "old_status_display": Device.STATUS_DISPLAY.get(r.get("old_status", ""), r.get("old_status", "")),
+                    "new_status_display": Device.STATUS_DISPLAY.get(dev.status, dev.status),
+                    "action":             r["action"],
+                    "worker":             current_user.full_name or current_user.username,
+                    "timestamp":          datetime.now().strftime('%d.%m.%Y %H:%M'),
+                })
 
         ACTION_DISPLAYS = {
             'COMPLETED': '✅ Готово',
