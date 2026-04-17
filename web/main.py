@@ -23,9 +23,11 @@ from src.logger import logger
 import time
 
 from src.database import get_session, engine
-from src.models import Base
+from src.models import Base, RouteConfig, RouteConfigStage, ROUTE_PIPELINE_STAGES
 from src.config import config
 from web.routes import auth, dashboard, analytics, projects, pipeline, scan, devices, sn_pool, admin
+from web.routes import route_configs as route_configs_router
+from web.routes import archive as archive_router
 from web.dependencies import get_current_user, require_admin, require_manager
 from fastapi_csrf_protect import CsrfProtect
 from fastapi_csrf_protect.exceptions import CsrfProtectError
@@ -35,11 +37,43 @@ Base.metadata.create_all(bind=engine)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup logic
+    # Startup
     logger.info("Application starting up...")
+    _init_default_route()
     yield
-    # Shutdown logic
+    # Shutdown
     logger.info("Application shutting down...")
+
+
+def _init_default_route():
+    """Create the default RouteConfig (all stages enabled) if it doesn't exist yet."""
+    from src.database import SessionLocal
+    db = SessionLocal()
+    try:
+        exists = db.query(RouteConfig).filter_by(is_default=True).first()
+        if not exists:
+            from datetime import datetime
+            rc = RouteConfig(
+                name='Стандартный маршрут (все этапы)',
+                description='Дефолтная конфигурация — все 11 этапов включены.',
+                is_default=True,
+                created_at=datetime.now(),
+            )
+            db.add(rc)
+            db.flush()
+            for key, label, idx in ROUTE_PIPELINE_STAGES:
+                db.add(RouteConfigStage(
+                    route_config_id=rc.id,
+                    stage_key=key,
+                    order_index=idx,
+                    is_enabled=True,
+                ))
+            db.commit()
+            logger.info(f"Default RouteConfig created: id={rc.id}")
+    except Exception as e:
+        logger.warning(f"Could not init default route: {e}")
+    finally:
+        db.close()
 
 app = FastAPI(
     title="Production Manager Web",
@@ -128,22 +162,27 @@ app.include_router(scan.router, prefix="", tags=["Pages"])
 app.include_router(devices.router, prefix="", tags=["Pages"])
 app.include_router(sn_pool.router, prefix="", tags=["Pages"])
 app.include_router(admin.router, prefix="", tags=["Pages"])
+app.include_router(route_configs_router.router, prefix="", tags=["Pages"])
+app.include_router(archive_router.router, prefix="", tags=["Pages"])
 
 # =============================================
 # API эндпоинты (JSON)
 # =============================================
 
 from web.api import dashboard_api, analytics_api, projects_api, pipeline_api, devices_api, sn_pool_api, admin_api, scan_api, health_api
+from web.api import route_config_api, archive_api
 
-app.include_router(dashboard_api.router, prefix="/api/dashboard", tags=["API Dashboard"], dependencies=[Depends(get_current_user)])
-app.include_router(health_api.router, prefix="/api/health", tags=["System Health"])
-app.include_router(analytics_api.router, prefix="/api/analytics", tags=["API Analytics"], dependencies=[Depends(get_current_user)])
-app.include_router(projects_api.router, prefix="/api/projects", tags=["API Projects"], dependencies=[Depends(get_current_user)])
-app.include_router(pipeline_api.router, prefix="/api/pipeline", tags=["API Pipeline"], dependencies=[Depends(get_current_user)])
-app.include_router(devices_api.router, prefix="/api/devices", tags=["API Devices"], dependencies=[Depends(get_current_user)])
-app.include_router(sn_pool_api.router, prefix="/api/sn-pool", tags=["API SN Pool"], dependencies=[Depends(get_current_user)])
-app.include_router(admin_api.router, prefix="/api/admin", tags=["API Admin"], dependencies=[Depends(require_admin)])
-app.include_router(scan_api.router, prefix="/api/scan", tags=["API Scan"], dependencies=[Depends(get_current_user)])
+app.include_router(dashboard_api.router,    prefix="/api/dashboard",      tags=["API Dashboard"],  dependencies=[Depends(get_current_user)])
+app.include_router(health_api.router,       prefix="/api/health",          tags=["System Health"])
+app.include_router(analytics_api.router,    prefix="/api/analytics",       tags=["API Analytics"],  dependencies=[Depends(get_current_user)])
+app.include_router(projects_api.router,     prefix="/api/projects",        tags=["API Projects"],   dependencies=[Depends(get_current_user)])
+app.include_router(pipeline_api.router,     prefix="/api/pipeline",        tags=["API Pipeline"],   dependencies=[Depends(get_current_user)])
+app.include_router(devices_api.router,      prefix="/api/devices",         tags=["API Devices"],    dependencies=[Depends(get_current_user)])
+app.include_router(sn_pool_api.router,      prefix="/api/sn-pool",         tags=["API SN Pool"],    dependencies=[Depends(get_current_user)])
+app.include_router(admin_api.router,        prefix="/api/admin",           tags=["API Admin"],      dependencies=[Depends(require_admin)])
+app.include_router(scan_api.router,         prefix="/api/scan",            tags=["API Scan"],       dependencies=[Depends(get_current_user)])
+app.include_router(route_config_api.router, prefix="/api/route-configs",   tags=["API Routes"],     dependencies=[Depends(get_current_user)])
+app.include_router(archive_api.router,      prefix="/api/archive",         tags=["API Archive"],    dependencies=[Depends(get_current_user)])
 
 
 # =============================================

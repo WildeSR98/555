@@ -10,30 +10,60 @@ API эндпоинты для Scan — производственный проц
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
 from typing import List, Optional
 from datetime import datetime
-from pydantic import BaseModel, Field, field_validator
-import re
+from pydantic import BaseModel, Field
 
 from src.database import get_db
-from src.models import Workplace, WorkSession, WorkLog, Device, User, Project
+from src.models import Workplace, WorkSession, WorkLog, Device, User, Project, ProjectRoute
 from src.logic.workflow import WorkflowEngine
+from src.system_config import get_route_bypass_roles, get_cooldown_bypass_roles
 from web.dependencies import get_current_user
 
 router = APIRouter()
 
 
+# ─── Логика пропуска отключённых этапов согласно маршруту проекта ──────────────────
+
+_STAGE_NEXT = {
+    # комплетед этап → следующий WAITING
+    'PRE_PRODUCTION':    'WAITING_ASSEMBLY',
+    'KITTING':           'WAITING_ASSEMBLY',
+    'ASSEMBLY':          'WAITING_VIBROSTAND',
+    'VIBROSTAND':        'WAITING_TECH_CONTROL_1_1',
+    'TECH_CONTROL_1_1':  'WAITING_TECH_CONTROL_1_2',
+    'TECH_CONTROL_1_2':  'WAITING_FUNC_CONTROL',
+    'FUNC_CONTROL':      'WAITING_TECH_CONTROL_2_1',
+    'TECH_CONTROL_2_1':  'WAITING_TECH_CONTROL_2_2',
+    'TECH_CONTROL_2_2':  'WAITING_PACKING',
+    'PACKING':           'WAITING_ACCOUNTING',
+    'ACCOUNTING':        'WAITING_WAREHOUSE',
+    'WAREHOUSE':         'QC_PASSED',
+}
+
+
+def resolve_next_status(current_status: str, enabled_stages: list) -> str:
+    """
+    Берёт следующий статус с учётом активных этапов маршрута.
+    Если следующий этап отключён — пропускает его и ищет дальше.
+    """
+    if not enabled_stages:   # Дефолтный маршрут — все этапы активны
+        return _STAGE_NEXT.get(current_status, 'QC_PASSED')
+
+    candidate = _STAGE_NEXT.get(current_status, 'QC_PASSED')
+    for _ in range(15):  # защита от бесконечного цикла
+        if not candidate or not candidate.startswith('WAITING_'):
+            return candidate  # QC_PASSED или терминальный статус
+        stage = candidate[len('WAITING_'):]  # WAITING_VIBROSTAND → VIBROSTAND
+        if stage in enabled_stages:
+            return candidate  # этап активен
+        # Этап отключён — пропускаем: находим что идёт после этого этапа
+        candidate = _STAGE_NEXT.get(stage, 'QC_PASSED')
+    return candidate
+
+
 class StartSessionRequest(BaseModel):
     workplace_id: int = Field(..., gt=0)
-    worker_code: str = Field(..., min_length=2, max_length=50)
-
-    @field_validator('worker_code')
-    @classmethod
-    def validate_worker_code(cls, v):
-        if not re.match(r'^[a-zA-Z0-9_\-]+$', v):
-            raise ValueError('worker_code must be alphanumeric (plus _ or -)')
-        return v
 
 
 class ProcessBatchRequest(BaseModel):
@@ -50,6 +80,8 @@ class ActionRequest(BaseModel):
     worker_id: int = Field(..., gt=0)
     device_ids: List[int] = Field(..., min_length=1, max_length=100)
     action: str = Field(..., pattern='^(complete|defect|keep|semifinished|scan_in)$')
+    notes: Optional[str] = ''
+    target_status: Optional[str] = None  # Явный целевой статус (для поста Ремонта)
 
 
 class EndSessionRequest(BaseModel):
@@ -75,15 +107,13 @@ def get_workplaces(db: Session = Depends(get_db)):
 
 
 @router.post("/start-session")
-def start_session(data: StartSessionRequest, db: Session = Depends(get_db)):
-    """Шаг 1: Выбрать рабочее место + отсканировать QR работника."""
-    # Найти работника
-    worker = db.query(User).filter(
-        or_(User.username == data.worker_code, User.first_name == data.worker_code)
-    ).first()
-    
-    if not worker:
-        raise HTTPException(404, f'Работник "{data.worker_code}" не найден')
+def start_session(
+    data: StartSessionRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Шаг 1: Выбрать рабочее место. Работник — текущий авторизованный пользователь сайта."""
+    worker = current_user
 
     workplace = db.query(Workplace).get(data.workplace_id)
     if not workplace:
@@ -168,8 +198,11 @@ def process_batch(
                         "error": f'{sn}: Вы выполняли предыдущий этап. Запрет подряд.'
                     }
 
-            # Проверка спецификации (спеки)
-            if device.project and device.project.spec_link and device.project.spec_code:
+            # Определяем заранее: уже принято в работу или ещё нет
+            already_accepted = (device.status == workplace.workplace_type)
+
+            # Проверка спецификации — обязательна для ВСЕХ (включая admin/начальника цеха)
+            if not already_accepted and device.project and device.project.spec_link and device.project.spec_code:
                 if device.project.id not in (data.verified_project_ids or []):
                     return {
                         "ok": False,
@@ -179,19 +212,22 @@ def process_batch(
                         "spec_code": device.project.spec_code
                     }
 
-            # 1. Валидация по логике Workflow (можно ли принять этот SN на этот пост)
-            ok, msg = WorkflowEngine.can_accept_device(workplace.workplace_type, device.status)
-            if not ok:
-                return {"ok": False, "error": f'{sn}: {msg}'}
+            # Проверка маршрута — только для обычных пользователей.
+            # Привилегированные роли читаются из БД (root настраивает через админпанель).
+            route_bypass = get_route_bypass_roles(db)
+            is_privileged = current_user.role in route_bypass
+            if not is_privileged:
+                ok, msg = WorkflowEngine.can_accept_device(workplace.workplace_type, device.status)
+                if not ok:
+                    return {"ok": False, "error": f'{sn}: {msg}'}
 
             valid_devices.append(device)
 
             # Определяем: нужно принять в работу или уже принят
-            status = device.status or ""
-            if status.startswith('WAITING_') or status != workplace.workplace_type:
-                to_scan_in.append(device)
-            else:
+            if already_accepted:
                 already_in.append(device)
+            else:
+                to_scan_in.append(device)
 
         # process-batch только ВАЛИДИРУЕТ. SCAN_IN делается отдельным шагом через action=scan_in.
         return {
@@ -219,17 +255,17 @@ def do_action(
 ):
     """Шаг 3: Действие с устройствами (Готово / Брак / Оставить / Полуфабрикат)."""
     STATUS_MAP = {
-        'KITTING': 'WAITING_PRE_PRODUCTION',
-        'PRE_PRODUCTION': 'WAITING_ASSEMBLY',
+        'PRE_PRODUCTION': 'WAITING_ASSEMBLY',  # Комплектовка → Сборка
+        'KITTING': 'WAITING_ASSEMBLY',
         'ASSEMBLY': 'WAITING_VIBROSTAND',
         'VIBROSTAND': 'WAITING_TECH_CONTROL_1_1',
-        'TECH_CONTROL_1_1': 'WAITING_FUNC_CONTROL',
+        'TECH_CONTROL_1_1': 'WAITING_TECH_CONTROL_1_2',
         'TECH_CONTROL_1_2': 'WAITING_FUNC_CONTROL',
         'FUNC_CONTROL': 'WAITING_TECH_CONTROL_2_1',
-        'TECH_CONTROL_2_1': 'WAITING_PACKING',
+        'TECH_CONTROL_2_1': 'WAITING_TECH_CONTROL_2_2',
         'TECH_CONTROL_2_2': 'WAITING_PACKING',
         'PACKING': 'WAITING_ACCOUNTING',
-        'ACCOUNTING': 'WAREHOUSE',
+        'ACCOUNTING': 'WAITING_WAREHOUSE',
         'WAREHOUSE': 'QC_PASSED',
     }
 
@@ -252,11 +288,29 @@ def do_action(
                 device.updated_at = datetime.now()
                 action_type = 'SCAN_IN'
             elif data.action == 'complete':
-                new_status = STATUS_MAP.get(old_status, 'QC_PASSED')
+                # Если передан явный target_status (пост Ремонта выбирает куда отправить)
+                if data.target_status:
+                    ALLOWED_REPAIR_TARGETS = [
+                        'WAITING_KITTING',
+                        'WAITING_ASSEMBLY', 'WAITING_VIBROSTAND',
+                        'WAITING_TECH_CONTROL_1_1', 'WAITING_TECH_CONTROL_1_2',
+                        'WAITING_FUNC_CONTROL',
+                    ]
+                    if data.target_status not in ALLOWED_REPAIR_TARGETS:
+                        return {"ok": False, "error": f"{device.serial_number}: Недопустимый целевой статус после ремонта."}
+                    new_status = data.target_status
+                else:
+                    # Ищем маршрут проекта и рассчитываем непропущенный статус
+                    pr = db.query(ProjectRoute).filter_by(project_id=device.project_id).first()
+                    enabled = pr.route_config.get_enabled_stages() if pr and pr.route_config else []
+                    new_status = resolve_next_status(old_status, enabled)
                 
                 # Проверка Workflow
                 last_log = db.query(WorkLog).filter(WorkLog.device_id == device.id).order_by(WorkLog.created_at.desc()).first()
-                ok, msg = WorkflowEngine.can_change_status(device, new_status, current_user, last_log)
+                ok, msg = WorkflowEngine.can_change_status(
+                    device, new_status, current_user, last_log,
+                    cooldown_bypass_roles=get_cooldown_bypass_roles(db)
+                )
                 if not ok:
                     return {"ok": False, "error": f"{device.serial_number}: {msg}"}
 
@@ -277,20 +331,23 @@ def do_action(
             else:
                 continue
 
-            log = WorkLog(
-                worker_id=data.worker_id,
-                session_id=data.session_id,
-                workplace_id=data.workplace_id,
-                device_id=device.id,
-                project_id=device.project_id,
-                action=action_type,
-                old_status=old_status,
-                new_status=device.status,
-                part_number=device.part_number or '',
-                serial_number=device.serial_number or '',
-                created_at=datetime.now(),
-            )
-            db.add(log)
+            # Действия ROOT не сохраняются в WorkLog
+            if current_user.role != User.ROLE_ROOT:
+                log = WorkLog(
+                    worker_id=data.worker_id,
+                    session_id=data.session_id,
+                    workplace_id=data.workplace_id,
+                    device_id=device.id,
+                    project_id=device.project_id,
+                    action=action_type,
+                    old_status=old_status,
+                    new_status=device.status,
+                    part_number=device.part_number or '',
+                    serial_number=device.serial_number or '',
+                    notes=data.notes or '',
+                    created_at=datetime.now(),
+                )
+                db.add(log)
             results.append({"sn": device.serial_number, "action": action_type, "device_id": device.id, "new_status": device.status})
 
         db.commit()

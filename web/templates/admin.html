@@ -143,6 +143,73 @@
     </div>
 </div>
 
+{% if user.role == 'ROOT' %}
+<div class="card" style="margin-top:28px; border:2px solid #7c3aed;">
+    <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px;">
+        <span style="font-size:22px;">&#128295;</span>
+        <div>
+            <h3 style="margin:0; color:#7c3aed;">&#1057;&#1080;&#1089;&#1090;&#1077;&#1084;&#1085;&#1099;&#1077; &#1085;&#1072;&#1089;&#1090;&#1088;&#1086;&#1081;&#1082;&#1080;</h3>
+            <p class="text-muted" style="margin:0; font-size:12px;">&#1054;&#1090;&#1086;&#1073;&#1088;&#1072;&#1078;&#1072;&#1077;&#1090;&#1089;&#1103; &#1090;&#1086;&#1083;&#1100;&#1082;&#1086; &#1076;&#1083;&#1103; root. &#1054;&#1087;&#1088;&#1077;&#1076;&#1077;&#1083;&#1103;&#1077;&#1090; привилегии ролей на производстве.</p>
+        </div>
+    </div>
+    <table class="table" id="settingsTable">
+        <thead>
+            <tr>
+                <th>Роль</th>
+                <th style="text-align:center;">Обход маршрута <span class="text-muted" style="font-size:11px;">(&#1083;&#1102;&#1073;&#1086;&#1081; &#1087;&#1086;&#1089;&#1090;)</span></th>
+                <th style="text-align:center;">Обход кулдауна <span class="text-muted" style="font-size:11px;">(5 мин)</span></th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><strong>Администратор</strong></td>
+                <td style="text-align:center;"><label class="toggle-switch"><input type="checkbox" id="route_ADMIN"><span class="toggle-slider"></span></label></td>
+                <td style="text-align:center;"><label class="toggle-switch"><input type="checkbox" id="cool_ADMIN"><span class="toggle-slider"></span></label></td>
+            </tr>
+            <tr>
+                <td><strong>Менеджер</strong></td>
+                <td style="text-align:center;"><label class="toggle-switch"><input type="checkbox" id="route_MANAGER"><span class="toggle-slider"></span></label></td>
+                <td style="text-align:center;"><label class="toggle-switch"><input type="checkbox" id="cool_MANAGER"><span class="toggle-slider"></span></label></td>
+            </tr>
+            <tr>
+                <td><strong>Начальник цеха</strong></td>
+                <td style="text-align:center;"><label class="toggle-switch"><input type="checkbox" id="route_SHOP_MANAGER"><span class="toggle-slider"></span></label></td>
+                <td style="text-align:center;"><label class="toggle-switch"><input type="checkbox" id="cool_SHOP_MANAGER"><span class="toggle-slider"></span></label></td>
+            </tr>
+            <tr>
+                <td><strong>Сотрудник</strong></td>
+                <td style="text-align:center;"><label class="toggle-switch"><input type="checkbox" id="route_EMPLOYEE"><span class="toggle-slider"></span></label></td>
+                <td style="text-align:center;"><label class="toggle-switch"><input type="checkbox" id="cool_EMPLOYEE"><span class="toggle-slider"></span></label></td>
+            </tr>
+            <tr>
+                <td><strong>Работник</strong></td>
+                <td style="text-align:center;"><label class="toggle-switch"><input type="checkbox" id="route_WORKER"><span class="toggle-slider"></span></label></td>
+                <td style="text-align:center;"><label class="toggle-switch"><input type="checkbox" id="cool_WORKER"><span class="toggle-slider"></span></label></td>
+            </tr>
+        </tbody>
+    </table>
+    <div style="display:flex; align-items:center; gap:12px; margin-top:16px;">
+        <button class="btn btn-primary" onclick="saveSettings()">💾 Сохранить настройки</button>
+        <span id="settingsSaveMsg" style="font-size:13px; color:#22c55e; display:none;">✓ Сохранено</span>
+    </div>
+</div>
+{% endif %}
+
+<style>
+.toggle-switch { position:relative; display:inline-block; width:44px; height:24px; }
+.toggle-switch input { opacity:0; width:0; height:0; }
+.toggle-slider {
+    position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0;
+    background:#ccc; border-radius:24px; transition:.3s;
+}
+.toggle-switch input:checked + .toggle-slider { background:#7c3aed; }
+.toggle-slider:before {
+    content:""; position:absolute; height:18px; width:18px;
+    left:3px; bottom:3px; background:white; border-radius:50%; transition:.3s;
+}
+.toggle-switch input:checked + .toggle-slider:before { transform:translateX(20px); }
+</style>
+
 {% endblock %}
 
 {% block extra_js %}
@@ -256,5 +323,49 @@ document.querySelectorAll('.modal-overlay').forEach(m => {
         if (e.target === m) m.style.display = 'none';
     });
 });
+
+// ================= ROOT: Системные настройки =================
+const SETTING_ROLES = ['ADMIN', 'MANAGER', 'SHOP_MANAGER', 'EMPLOYEE', 'WORKER'];
+
+async function loadSettings() {
+    try {
+        const resp = await fetch('/api/admin/settings');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        SETTING_ROLES.forEach(role => {
+            const routeEl = document.getElementById(`route_${role}`);
+            const coolEl  = document.getElementById(`cool_${role}`);
+            if (routeEl) routeEl.checked = (data.route_bypass_roles || []).includes(role);
+            if (coolEl)  coolEl.checked  = (data.cooldown_bypass_roles || []).includes(role);
+        });
+    } catch(e) {}
+}
+
+async function saveSettings() {
+    const route_bypass_roles    = SETTING_ROLES.filter(r => document.getElementById(`route_${r}`)?.checked);
+    const cooldown_bypass_roles = SETTING_ROLES.filter(r => document.getElementById(`cool_${r}`)?.checked);
+    try {
+        const resp = await fetch('/api/admin/settings', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ route_bypass_roles, cooldown_bypass_roles })
+        });
+        const result = await resp.json();
+        if (resp.ok) {
+            const msg = document.getElementById('settingsSaveMsg');
+            msg.style.display = 'inline';
+            setTimeout(() => msg.style.display = 'none', 3000);
+        } else {
+            alert(result.detail || 'Ошибка сохранения');
+        }
+    } catch(e) {
+        alert('Ошибка сети: ' + e.message);
+    }
+}
+
+// Загружаем настройки только если есть таблица (т.е. ROOT)
+if (document.getElementById('settingsTable')) {
+    loadSettings();
+}
 </script>
 {% endblock %}

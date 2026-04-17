@@ -23,10 +23,10 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "web" / "templates"))
 def admin_page(request: Request, db: Session = Depends(get_db), csrf_protect: CsrfProtect = Depends()):
     """Страница Admin Panel."""
     user = get_current_user(request)
-    if not user or user.role != 'ADMIN':
+    if not user or user.role not in ('ADMIN', 'ROOT'):
         return RedirectResponse(url="/dashboard")
 
-    users = db.query(User).order_by(User.date_joined.desc()).all()
+    users = db.query(User).filter(User.role != 'ROOT').order_by(User.date_joined.desc()).all()
 
     return render_template("admin.html", {
         "user": user,

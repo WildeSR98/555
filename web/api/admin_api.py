@@ -10,13 +10,16 @@ API эндпоинты для Admin — CRUD пользователей.
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 from pydantic import BaseModel, Field, field_validator
 import re
+import json
 
 from src.database import get_db
-from src.models import User, WorkLog
+from src.models import User, WorkLog, SystemConfig
+from src.system_config import get_all_settings, set_config
+from web.dependencies import get_current_user
 
 router = APIRouter()
 
@@ -45,8 +48,8 @@ class UserUpdate(BaseModel):
 
 @router.get("/users")
 def get_users(db: Session = Depends(get_db)):
-    """Получить всех пользователей."""
-    users = db.query(User).order_by(User.date_joined.desc()).all()
+    """Получить всех пользователей (root скрыт)."""
+    users = db.query(User).filter(User.role != 'ROOT').order_by(User.date_joined.desc()).all()
     
     return [
         {
@@ -92,7 +95,7 @@ def create_user(data: UserCreate, db: Session = Depends(get_db)):
 def update_user(user_id: int, data: UserUpdate, db: Session = Depends(get_db)):
     """Редактировать пользователя."""
     user = db.query(User).get(user_id)
-    if not user:
+    if not user or user.role == 'ROOT':
         raise HTTPException(404, "Пользователь не найден")
 
     if data.first_name is not None:
@@ -112,7 +115,7 @@ def update_user(user_id: int, data: UserUpdate, db: Session = Depends(get_db)):
 def toggle_user_active(user_id: int, db: Session = Depends(get_db)):
     """Блокировка / Разблокировка пользователя."""
     user = db.query(User).get(user_id)
-    if not user:
+    if not user or user.role == 'ROOT':
         raise HTTPException(404, "Пользователь не найден")
 
     user.is_active = not user.is_active
@@ -125,8 +128,8 @@ def toggle_user_active(user_id: int, db: Session = Depends(get_db)):
 @router.get("/stats")
 def get_admin_stats(db: Session = Depends(get_db)):
     """Получить статистику для админки."""
-    total_users = db.query(User).count()
-    active_users = db.query(User).filter_by(is_active=True).count()
+    total_users = db.query(User).filter(User.role != 'ROOT').count()
+    active_users = db.query(User).filter_by(is_active=True).filter(User.role != 'ROOT').count()
     total_worklogs = db.query(WorkLog).count()
     
     return {
@@ -134,3 +137,44 @@ def get_admin_stats(db: Session = Depends(get_db)):
         "active_users": active_users,
         "total_worklogs": total_worklogs,
     }
+
+
+# =============================================
+# Настройки системы (ROOT only)
+# =============================================
+
+class SettingsUpdate(BaseModel):
+    route_bypass_roles: List[str]
+    cooldown_bypass_roles: List[str]
+
+
+@router.get("/settings")
+def get_settings(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Системные настройки — только ROOT."""
+    if current_user.role != 'ROOT':
+        raise HTTPException(403, "Доступ запрещён")
+    return get_all_settings(db)
+
+
+@router.put("/settings")
+def update_settings(
+    data: SettingsUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Обновить системные настройки — только ROOT."""
+    if current_user.role != 'ROOT':
+        raise HTTPException(403, "Доступ запрещён")
+
+    # Санитизация: допустимые роли (без ROOT)
+    ALLOWED = {'ADMIN', 'MANAGER', 'SHOP_MANAGER', 'EMPLOYEE', 'WORKER'}
+    route_roles  = [r for r in data.route_bypass_roles  if r in ALLOWED]
+    cool_roles   = [r for r in data.cooldown_bypass_roles if r in ALLOWED]
+
+    set_config(db, 'route_bypass_roles',    route_roles)
+    set_config(db, 'cooldown_bypass_roles', cool_roles)
+
+    return {"ok": True, "message": "Настройки сохранены"}

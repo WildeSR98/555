@@ -75,6 +75,7 @@ class User(Base):
     ROLE_SHOP_MANAGER = 'SHOP_MANAGER'
     ROLE_EMPLOYEE = 'EMPLOYEE'
     ROLE_WORKER = 'WORKER'
+    ROLE_ROOT = 'ROOT'  # Скрытая системная рольь, не отображается в UI
 
     ROLE_DISPLAY = {
         'ADMIN': 'Администратор',
@@ -278,8 +279,8 @@ class Device(Base):
         'MAINTENANCE': 'На обслуживании', 'BROKEN': 'Неисправно',
         'RETIRED': 'Списано',
         'WAITING_KITTING': 'Ожидание комплектовки',
-        'PRE_PRODUCTION': 'Подготовка',
-        'WAITING_PRE_PRODUCTION': 'Ожидание подготовки',
+        'PRE_PRODUCTION': 'Комплектовка',
+        'WAITING_PRE_PRODUCTION': 'Ожидание комплектовки',
         'WAITING_ASSEMBLY': 'Ожидание сборки',
         'ASSEMBLY': 'Сборка',
         'WAITING_VIBROSTAND': 'Ожидание вибростенда',
@@ -301,8 +302,9 @@ class Device(Base):
         'PACKING': 'Упаковка', 
         'WAITING_ACCOUNTING': 'Ожидание учёта',
         'ACCOUNTING': 'Учёт',
-        'WAREHOUSE': 'Склад (Завершено)',
-        'SHIPPED': 'Отгружено',
+        'WAITING_WAREHOUSE': 'Ожидание склада',
+        'WAREHOUSE': 'Склад',
+        'QC_PASSED': 'Склад (Завершено)',
     }
 
     STATUS_COLORS = {
@@ -327,11 +329,12 @@ class Device(Base):
         'PACKING': '#14b8a6', 
         'WAITING_ACCOUNTING': '#94a3b8',
         'ACCOUNTING': '#8b5cf6',
-        'QC_PASSED': '#22c55e', 
+        'QC_PASSED': '#22c55e',
         'DEFECT': '#ef4444',
-        'WAITING_PARTS': '#f59e0b', 
+        'WAITING_PARTS': '#f59e0b',
         'WAITING_SOFTWARE': '#f59e0b',
-        'WAREHOUSE': '#22c55e',
+        'WAITING_WAREHOUSE': '#94a3b8',
+        'WAREHOUSE': '#16a34a',
         'SHIPPED': '#059669',
         'ACTIVE': '#28a745', 'INACTIVE': '#6c757d',
         'MAINTENANCE': '#ffc107', 'BROKEN': '#dc3545', 'RETIRED': '#343a40',
@@ -350,7 +353,7 @@ class Device(Base):
         'WAITING_TECH_CONTROL_2_2', 'TECH_CONTROL_2_2',
         'WAITING_PACKING', 'PACKING', 
         'WAITING_ACCOUNTING', 'ACCOUNTING',
-        'WAREHOUSE', 'QC_PASSED',
+        'WAITING_WAREHOUSE', 'WAREHOUSE', 'QC_PASSED',
         'DEFECT', 'WAITING_PARTS', 'WAITING_SOFTWARE', 'SHIPPED'
     ]
 
@@ -459,7 +462,7 @@ class Workplace(Base):
     )
 
     TYPE_DISPLAY = {
-        'PRE_PRODUCTION': 'Подготовка производства',
+        'PRE_PRODUCTION': 'Комплектовка',
         'ASSEMBLY': 'Сборка', 'VIBROSTAND': 'Вибростенд',
         'TECH_CONTROL_1_1': 'Тех. контроль 1.1',
         'TECH_CONTROL_1_2': 'Тех. контроль 1.2',
@@ -554,3 +557,114 @@ class WorkLog(Base):
 
     def __repr__(self) -> str:
         return f"{self.created_at} [{self.workplace}] SN:{self.serial_number} — {self.action_display}"
+
+
+# =============================================
+# Системные настройки (только для root)
+# =============================================
+
+class SystemConfig(Base):
+    """Key-value хранилище системных настроек. Управляется только через root."""
+    __tablename__ = 'pm_system_config'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    key = Column(String(100), unique=True, nullable=False)
+    value = Column(Text, nullable=True)
+    updated_at = Column(DateTime, nullable=True)
+
+    def __repr__(self) -> str:
+        return f"SystemConfig({self.key}={self.value})"
+
+
+# =============================================
+# Маршрутные листы (Route Configs)
+# =============================================
+
+# Упорядоченный список этапов конвейера для маршрутных листов
+ROUTE_PIPELINE_STAGES = [
+    ('KITTING',           'Комплектовка',       1),
+    ('ASSEMBLY',          'Сборка',             2),
+    ('VIBROSTAND',        'Вибростенд',         3),
+    ('TECH_CONTROL_1_1',  'ОТК 1.1',            4),
+    ('TECH_CONTROL_1_2',  'ОТК 1.2',            5),
+    ('FUNC_CONTROL',      'Функц. контроль',    6),
+    ('TECH_CONTROL_2_1',  'ОТК 2.1',            7),
+    ('TECH_CONTROL_2_2',  'ОТК 2.2',            8),
+    ('PACKING',           'Упаковка',           9),
+    ('ACCOUNTING',        'Учёт',               10),
+    ('WAREHOUSE',         'Склад',              11),
+]
+
+
+class RouteConfig(Base):
+    """Конфигурация маршрута производства."""
+    __tablename__ = 'pm_route_config'
+
+    id           = Column(Integer, primary_key=True, autoincrement=True)
+    name         = Column(String(200), nullable=False)
+    description  = Column(Text, default='')
+    device_type  = Column(String(50), nullable=True)   # Привязка к типу устройства
+    is_default   = Column(Boolean, default=False)      # Системный дефолтный, нельзя удалить
+    created_at   = Column(DateTime, nullable=True)
+    created_by_id = Column(Integer, ForeignKey('accounts_user.id', ondelete='SET NULL'), nullable=True)
+
+    # Relationships
+    stages    = relationship('RouteConfigStage',  back_populates='route_config',
+                             cascade='all, delete-orphan', order_by='RouteConfigStage.order_index')
+    editors   = relationship('RouteConfigEditor', back_populates='route_config',
+                             cascade='all, delete-orphan')
+    created_by = relationship('User', foreign_keys=[created_by_id])
+
+    def get_enabled_stages(self) -> list:
+        """Список включённых этапов (ключи)."""
+        return [s.stage_key for s in self.stages if s.is_enabled]
+
+    def __repr__(self) -> str:
+        return f"RouteConfig({self.id}: {self.name})"
+
+
+class RouteConfigStage(Base):
+    """Этап маршрута с флагом включения."""
+    __tablename__ = 'pm_route_config_stage'
+
+    id               = Column(Integer, primary_key=True, autoincrement=True)
+    route_config_id  = Column(Integer, ForeignKey('pm_route_config.id', ondelete='CASCADE'), nullable=False)
+    stage_key        = Column(String(50), nullable=False)   # напр. ASSEMBLY
+    order_index      = Column(Integer, nullable=False)
+    is_enabled       = Column(Boolean, default=True)
+
+    route_config = relationship('RouteConfig', back_populates='stages')
+
+    def __repr__(self) -> str:
+        flag = '✅' if self.is_enabled else '❌'
+        return f"{self.order_index}. {flag} {self.stage_key}"
+
+
+class RouteConfigEditor(Base):
+    """Пользователь, получивший права на редактирование конкретного маршрута."""
+    __tablename__ = 'pm_route_config_editor'
+
+    id               = Column(Integer, primary_key=True, autoincrement=True)
+    route_config_id  = Column(Integer, ForeignKey('pm_route_config.id', ondelete='CASCADE'), nullable=False)
+    user_id          = Column(Integer, ForeignKey('accounts_user.id', ondelete='CASCADE'), nullable=False)
+
+    route_config = relationship('RouteConfig', back_populates='editors')
+    user         = relationship('User', foreign_keys=[user_id])
+
+
+class ProjectRoute(Base):
+    """Назначенный маршрут производства для проекта."""
+    __tablename__ = 'pm_project_route'
+
+    id               = Column(Integer, primary_key=True, autoincrement=True)
+    project_id       = Column(Integer, ForeignKey('tasks_project.id', ondelete='CASCADE'),
+                              nullable=False, unique=True)
+    route_config_id  = Column(Integer, ForeignKey('pm_route_config.id', ondelete='SET NULL'), nullable=True)
+    assigned_at      = Column(DateTime, nullable=True)
+    assigned_by_id   = Column(Integer, ForeignKey('accounts_user.id', ondelete='SET NULL'), nullable=True)
+
+    route_config = relationship('RouteConfig')
+    assigned_by  = relationship('User', foreign_keys=[assigned_by_id])
+
+    def __repr__(self) -> str:
+        return f"ProjectRoute(project={self.project_id} → route={self.route_config_id})"
