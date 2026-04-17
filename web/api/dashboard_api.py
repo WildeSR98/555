@@ -70,3 +70,19 @@ def get_chart_data(db: Session = Depends(get_db)):
             ).group_by(Workplace.workplace_type).all()
         },
     }
+
+
+@router.get("/live-stats")
+def get_live_stats(db: Session = Depends(get_db)):
+    """Лёгкий endpoint — только 4 числа для live-обновления карточек дашборда."""
+    from datetime import date
+    today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    return {
+        "total_devices":      db.query(Device).count(),
+        "completed_today":    db.query(WorkLog).filter(
+            WorkLog.action == 'COMPLETED',
+            WorkLog.created_at >= today_start
+        ).count(),
+        "defects":            db.query(Device).filter(Device.status == 'DEFECT').count(),
+        "active_sessions":    db.query(WorkSession).filter_by(is_active=True).count(),
+    }

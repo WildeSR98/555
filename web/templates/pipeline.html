@@ -83,12 +83,12 @@
             <!-- Карточка ожидания -->
             <div class="pipeline-mini-card pipeline-waiting" data-status="{{ stage.waiting_code }}" onclick="loadDevices('{{ stage.waiting_code }}', 'Ожид. {{ stage.label }}')">
                 <div class="pipeline-mini-label">Ожид.</div>
-                <div class="pipeline-mini-count">{{ stage.waiting_count }}</div>
+                <div class="pipeline-mini-count" id="cnt-{{ stage.waiting_code }}">{{ stage.waiting_count }}</div>
             </div>
             <!-- Карточка в работе -->
             <div class="pipeline-mini-card pipeline-working" data-status="{{ stage.working_code }}" onclick="loadDevices('{{ stage.working_code }}', '{{ stage.label }}')">
                 <div class="pipeline-mini-label">{{ stage.label }}</div>
-                <div class="pipeline-mini-count">{{ stage.working_count }}</div>
+                <div class="pipeline-mini-count" id="cnt-{{ stage.working_code }}">{{ stage.working_count }}</div>
             </div>
         </div>
         {% if not loop.last %}
@@ -108,7 +108,7 @@
     <div class="pipeline-mini-card pipeline-extra {% if extra.code == 'DEFECT' %}pipeline-defect{% elif extra.code == 'SHIPPED' or extra.code == 'QC_PASSED' %}pipeline-done{% endif %}"
          data-status="{{ extra.code }}" onclick="loadDevices('{{ extra.code }}', '{{ extra.label }}')" style="min-width: 130px;">
         <div class="pipeline-mini-label">{{ extra.label }}</div>
-        <div class="pipeline-mini-count">{{ extra.count }}</div>
+        <div class="pipeline-mini-count" id="cnt-{{ extra.code }}">{{ extra.count }}</div>
     </div>
     {% endfor %}
 </div>
@@ -178,13 +178,30 @@ async function loadDevices(status, label) {
     }
 }
 
-// Авто-обновление каждые 30 секунд
-setInterval(() => {
+// Авто-обновление через WS (live, без polling)
+window.addEventListener('ws:device_changed', (e) => {
+    const {old_status, new_status, device_name, serial_number} = e.detail;
+    adjustCounter(old_status, -1);
+    adjustCounter(new_status, +1);
+    // Если в правой панели открыт этот статус — перезагрузить таблицу
     if (activeCard) {
-        const status = activeCard.dataset.status;
-        const label = activeCard.querySelector('.pipeline-mini-label').textContent;
-        loadDevices(status, label);
+        const s = activeCard.dataset.status;
+        if (s === old_status || s === new_status) {
+            const lbl = activeCard.querySelector('.pipeline-mini-label').textContent;
+            loadDevices(s, lbl);
+        }
     }
-}, 30000);
+});
+
+function adjustCounter(status, delta) {
+    const el = document.getElementById('cnt-' + status);
+    if (!el) return;
+    const n = Math.max(0, (parseInt(el.textContent) || 0) + delta);
+    el.textContent = n;
+    el.classList.remove('flash-count');
+    void el.offsetWidth; // reflow
+    el.classList.add('flash-count');
+    setTimeout(() => el.classList.remove('flash-count'), 600);
+}
 </script>
 {% endblock %}

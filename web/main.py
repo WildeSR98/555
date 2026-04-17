@@ -170,7 +170,7 @@ app.include_router(archive_router.router, prefix="", tags=["Pages"])
 # =============================================
 
 from web.api import dashboard_api, analytics_api, projects_api, pipeline_api, devices_api, sn_pool_api, admin_api, scan_api, health_api
-from web.api import route_config_api, archive_api
+from web.api import route_config_api, archive_api, ws_api
 
 app.include_router(dashboard_api.router,    prefix="/api/dashboard",      tags=["API Dashboard"],  dependencies=[Depends(get_current_user)])
 app.include_router(health_api.router,       prefix="/api/health",          tags=["System Health"])
@@ -183,6 +183,7 @@ app.include_router(admin_api.router,        prefix="/api/admin",           tags=
 app.include_router(scan_api.router,         prefix="/api/scan",            tags=["API Scan"],       dependencies=[Depends(get_current_user)])
 app.include_router(route_config_api.router, prefix="/api/route-configs",   tags=["API Routes"],     dependencies=[Depends(get_current_user)])
 app.include_router(archive_api.router,      prefix="/api/archive",         tags=["API Archive"],    dependencies=[Depends(get_current_user)])
+app.include_router(ws_api.router,           prefix="",                     tags=["WebSocket"])  # Авторизация внутри endpoint
 
 
 # =============================================
