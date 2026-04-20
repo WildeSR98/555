@@ -721,7 +721,9 @@ const PIPELINE_STAGES = [
 ];
 
 function getBaseLabel(key) {
-    return PIPELINE_STAGES.find(p => p.key === key)?.label || key;
+    // Handle duplicate stages like FUNC_CONTROL::2
+    const baseKey = key.includes('::') ? key.split('::')[0] : key;
+    return PIPELINE_STAGES.find(p => p.key === baseKey)?.label || baseKey;
 }
 function getSuffix(label, baseLabel) {
     if (!label || label === baseLabel) return '';
@@ -735,14 +737,25 @@ var _stageAdderCtx = 'global';
 function showStageAdder(ctx) {
     _stageAdderCtx = ctx;
     const current = ctx === 'global' ? (currentConfig?.stages || []) : (prCurrent?.stages || []);
-    const usedKeys = new Set(current.map(s => s.stage_key));
+
+    // Count instances of each base key (handles ::N duplicates)
+    const usedCounts = {};
+    current.forEach(s => {
+        const base = s.stage_key.includes('::') ? s.stage_key.split('::')[0] : s.stage_key;
+        usedCounts[base] = (usedCounts[base] || 0) + 1;
+    });
+
     document.getElementById('stageAdderGrid').innerHTML = PIPELINE_STAGES.map(ps => {
-        const used = usedKeys.has(ps.key);
-        return `<div class="add-stage-card ${used ? 'used' : ''}"
-                     onclick="${used ? '' : `addStageFromPicker('${ps.key}')`}">
+        const count = usedCounts[ps.key] || 0;
+        const badge = count > 0
+            ? `<div style="font-size:10px; color:#6366f1; margin-top:5px; font-weight:600;">
+                 &#x2b; Добавить ещё (уже ${count} в маршруте)
+               </div>`
+            : '';
+        return `<div class="add-stage-card" onclick="addStageFromPicker('${ps.key}')">
             <div style="font-weight:600; font-size:14px;">${ps.label}</div>
             <div style="font-size:11px; color:var(--text-muted); margin-top:3px;">${ps.key}</div>
-            ${used ? '<div style="font-size:10px; color:#94a3b8; margin-top:5px;">&#x2713; \u0423\u0436\u0435 \u0432 \u043c\u0430\u0440\u0448\u0440\u0443\u0442\u0435</div>' : ''}
+            ${badge}
         </div>`;
     }).join('');
     document.getElementById('stageAdderModal').style.display = 'flex';
@@ -751,17 +764,27 @@ function showStageAdder(ctx) {
 function addStageFromPicker(key) {
     const ps = PIPELINE_STAGES.find(p => p.key === key);
     if (!ps) return;
-    const stage = { stage_key: key, is_enabled: true, order_index: 999, label: ps.label, is_custom: false };
+
+    const targetStages = _stageAdderCtx === 'global' ? currentConfig.stages : prCurrent.stages;
+
+    // Count existing instances of this base key (incl. ::N duplicates)
+    const existingCount = targetStages.filter(s =>
+        (s.stage_key.includes('::') ? s.stage_key.split('::')[0] : s.stage_key) === key
+    ).length;
+
+    // KEY for first, KEY::2 for second, KEY::3 for third, etc.
+    const newKey   = existingCount === 0 ? key : `${key}::${existingCount + 1}`;
+    // Auto-label: "Функц. контроль", "Функц. контроль-2", ...
+    const newLabel = existingCount === 0 ? ps.label : `${ps.label}-${existingCount + 1}`;
+
+    const stage = { stage_key: newKey, is_enabled: true, order_index: 999, label: newLabel, is_custom: false };
+
     if (_stageAdderCtx === 'global') {
-        if (!currentConfig.stages.some(s => s.stage_key === key)) {
-            currentConfig.stages.push(stage);
-            renderEditor();
-        }
+        currentConfig.stages.push(stage);
+        renderEditor();
     } else {
-        if (!prCurrent.stages.some(s => s.stage_key === key)) {
-            prCurrent.stages.push(stage);
-            renderPrEditor({ ...prCurrent._lastData, stages: prCurrent.stages });
-        }
+        prCurrent.stages.push(stage);
+        renderPrEditor({ ...prCurrent._lastData, stages: prCurrent.stages });
     }
     closeModal('stageAdderModal');
 }
@@ -803,13 +826,58 @@ function confirmRename() {
     closeModal('stageRenameModal');
 }
 
-// ─── Remove Stage ───────────────────────────────────────────────────
+// ─── Remove Stage (global) ───────────────────────────────────────────────────
 function removeStage(key) {
+    const idx = currentConfig.stages.findIndex(s => s.stage_key === key);
+    if (idx < 0) return;
+    const name = currentConfig.stages[idx].label || getBaseLabel(key);
+    if (!confirm(
+        `Убрать «${name}» из глобального маршрута?\n\n` +
+        `\u0423стройства, ожидающие этот этап, пропустят его при следующем сканировании.`
+    )) return;
     currentConfig.stages = currentConfig.stages.filter(s => s.stage_key !== key);
     renderEditor();
 }
-function removePrStage(key) {
-    prCurrent.stages = prCurrent.stages.filter(s => s.stage_key !== key);
+
+// ─── Remove Stage (project) — async, checks affected devices ────────────────
+async function removePrStage(key) {
+    const stages = prCurrent.stages;
+    const idx = stages.findIndex(s => s.stage_key === key);
+    if (idx < 0) return;
+    const stageName = stages[idx].label || getBaseLabel(key);
+
+    // Call API to check affected devices
+    let affectedInfo = null;
+    if (prCurrent?.projectId && prCurrent?.deviceType) {
+        try {
+            const resp = await fetch(
+                `/api/project-routes/${prCurrent.projectId}/device/${prCurrent.deviceType}/check-remove?stage=${encodeURIComponent(key)}`
+            );
+            if (resp.ok) affectedInfo = await resp.json();
+        } catch(e) { console.warn('[check-remove]', e); }
+    }
+
+    if (affectedInfo && affectedInfo.affected_count > 0) {
+        const { affected_count, device_serials, has_more } = affectedInfo;
+        // Find next enabled stage after the removed one
+        const nextIdx = stages.findIndex((s, i) => i > idx && s.is_enabled);
+        const nextName = nextIdx >= 0
+            ? (stages[nextIdx].label || getBaseLabel(stages[nextIdx].stage_key))
+            : 'конец маршрута';
+        const serialsStr = device_serials.slice(0, 5).join(', ') +
+            (has_more || affected_count > 5 ? ` и ещё ${affected_count - 5}...` : '');
+        const ok = confirm(
+            `⚠️ ВНИМАНИЕ: ${affected_count} устройств ожидают этап «${stageName}».\n\n` +
+            `Устройства: ${serialsStr}\n\n` +
+            `После удаления следующий этап для них: «${nextName}».\n\n` +
+            `Продолжить?`
+        );
+        if (!ok) return;
+    } else {
+        if (!confirm(`Убрать «${stageName}» из маршрута?`)) return;
+    }
+
+    prCurrent.stages = stages.filter(s => s.stage_key !== key);
     renderPrEditor({ ...prCurrent._lastData, stages: prCurrent.stages });
 }
 
