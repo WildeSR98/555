@@ -3,23 +3,24 @@
 {% block title %}Проекты — Production Manager{% endblock %}
 
 {% block content %}
-<div class="page-header" style="display:flex; justify-content:space-between; align-items:center;">
+<div class="page-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
     <div>
         <h2>📋 Проекты</h2>
         <p class="text-muted">Дерево проектов, устройств и операций</p>
     </div>
-    <div style="display:flex; gap:10px;">
-        <input type="text" id="searchInput" placeholder="🔍 Поиск по коду, имени..." class="input-large" style="width:250px;" oninput="filterTree()">
-        <select id="statusFilter" class="input-large" onchange="loadTree()">
-            <option value="">Все статусы</option>
-            {% for code, name in status_choices.items() %}
-            <option value="{{ code }}">{{ name }}</option>
-            {% endfor %}
-        </select>
+    <div style="display:flex; gap:10px; align-items:center;">
+        <div style="display:flex; background:var(--card-bg); border:1px solid var(--border); border-radius:8px; overflow:hidden;">
+            <button id="tabActive" onclick="switchTab('active')"
+                style="padding:7px 18px; border:none; cursor:pointer; font-weight:600; transition:.2s;
+                       background:rgba(99,102,241,.15); color:#6366f1;">📋 Активные</button>
+            <button id="tabArchive" onclick="switchTab('archive')"
+                style="padding:7px 18px; border:none; cursor:pointer; font-weight:600; transition:.2s;
+                       background:transparent; color:var(--text-muted);">📦 Архив</button>
+        </div>
+        <input type="text" id="searchInput" placeholder="🔍 Поиск по коду, имени..." class="input-large" style="width:220px;" oninput="filterTree()">
         <button class="btn btn-primary" onclick="loadTree()">&#x27F3; Обновить</button>
         <a href="/route-configs" class="btn" style="background:rgba(99,102,241,.15); color:#6366f1; border:1px solid rgba(99,102,241,.3);">📋 Маршрутный лист</a>
-        <a href="/archive" class="btn" style="background:rgba(99,102,241,.08); color:var(--text-muted); border:1px solid var(--border);">📦 Архив</a>
-        <button class="btn btn-success" onclick="openCreateModal()">➕ Создать</button>
+        <button id="btnCreate" class="btn btn-success" onclick="openCreateModal()">➕ Создать</button>
     </div>
 </div>
 
@@ -163,6 +164,7 @@
 let treeData = [];
 let currentProjectId = null;
 let currentDeviceSN   = null;  // СН выбранного устройства
+let currentTab        = 'active';  // 'active' | 'archive'
 
 const deviceModels = JSON.parse(
     document.getElementById('device-models-data').textContent
@@ -172,10 +174,22 @@ document.addEventListener('DOMContentLoaded', () => {
     loadTree();
 });
 
+function switchTab(tab) {
+    currentTab = tab;
+    const isArchive = tab === 'archive';
+    document.getElementById('tabActive').style.background  = !isArchive ? 'rgba(99,102,241,.15)' : 'transparent';
+    document.getElementById('tabActive').style.color       = !isArchive ? '#6366f1'              : 'var(--text-muted)';
+    document.getElementById('tabArchive').style.background = isArchive  ? 'rgba(245,158,11,.15)' : 'transparent';
+    document.getElementById('tabArchive').style.color      = isArchive  ? '#f59e0b'              : 'var(--text-muted)';
+    document.getElementById('btnCreate').style.display = isArchive ? 'none' : '';
+    _clearDetailsPanel();
+    loadTree();
+}
+
 async function loadTree() {
-    const status = document.getElementById('statusFilter').value;
+    const param = currentTab === 'archive' ? '?status=ARCHIVED' : '';
     try {
-        const resp = await fetch(`/api/projects/tree?status=${status}`);
+        const resp = await fetch(`/api/projects/tree${param}`);
         treeData = await resp.json();
         renderTree();
     } catch (e) {

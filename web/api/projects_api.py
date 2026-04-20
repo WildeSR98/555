@@ -92,8 +92,15 @@ class DeleteProjectRequest(BaseModel):
 def get_projects_tree(status: Optional[str] = None, db: Session = Depends(get_db)):
     """Получить дерево проектов -> устройств -> операций (Оптимизировано)."""
     query = db.query(Project)
-    if status:
+    if status == 'ARCHIVED':
+        # Вкладка Архив — показываем только архивные
+        query = query.filter(Project.status == 'ARCHIVED')
+    elif status:
+        # Конкретный статус (не ARCHIVED) — фильтруем
         query = query.filter(Project.status == status)
+    else:
+        # По умолчанию — скрываем архивные (они на отдельной вкладке)
+        query = query.filter(Project.status != 'ARCHIVED')
     
     # Используем selectinload для одного дополнительного запроса на каждый уровень вложенности вместо N+1
     projects = query.options(
