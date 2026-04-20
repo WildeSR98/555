@@ -17,18 +17,11 @@
 
     <!-- ШАГ 1: Выбор рабочего места -->
     <div id="stepLogin" class="card glass-card animate-fade-in">
-        <h3 style="margin-bottom: 8px; font-weight: 700;">Шаг 1: Выбор рабочего места</h3>
-        <p class="text-muted" style="margin-bottom: 20px; font-size: 14px;">👤 Вы вошли как: <strong>{{ user.full_name }}</strong></p>
-        <form id="loginForm" onsubmit="startSession(event)" autocomplete="off">
-            <div class="form-group">
-                <label style="font-weight: 600; color: var(--text-muted);">📍 Выберите рабочее место:</label>
-                <select id="workplaceSelect" required class="input-large" autofocus>
-                    <option value="" disabled selected>Загрузка...</option>
-                </select>
-            </div>
-            
-            <button type="submit" class="btn btn-primary btn-block-large mt-4">Начать работу</button>
-        </form>
+        <h3 style="margin-bottom: 4px; font-weight: 700;">Шаг 1: Выбор рабочего места</h3>
+        <p class="text-muted" style="margin-bottom: 20px; font-size: 14px;">👤 Вы вошли как: <strong>{{ user.full_name }}</strong> &nbsp;·&nbsp; Нажмите на рабочее место для начала смены</p>
+        <div id="wpGrid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(160px, 1fr)); gap:12px;">
+            <div class="text-muted" style="font-size:13px; grid-column:1/-1;">⏳ Загрузка рабочих мест...</div>
+        </div>
     </div>
 
     <!-- ШАГ 2 & 3: Сканирование и действия (показывается после входа) -->
@@ -260,26 +253,66 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function loadWorkplaces() {
+    const ICONS = {
+        'PRE_PRODUCTION':    '📦',
+        'ASSEMBLY':         '🔧',
+        'VIBROSTAND':       '📳',
+        'TECH_CONTROL_1_1': '🔎',
+        'TECH_CONTROL_1_2': '🔍',
+        'FUNC_CONTROL':     '⚡',
+        'TECH_CONTROL_2_1': '🔎',
+        'TECH_CONTROL_2_2': '🔍',
+        'PACKING':          '📦',
+        'ACCOUNTING':       '🧮',
+        'WAREHOUSE':        '🏭',
+        'REPAIR':           '🛠',
+        'WAITING_POOL':     '⏳',
+    };
+    const COLORS = {
+        'PRE_PRODUCTION':    '#6366f1',
+        'ASSEMBLY':         '#3b82f6',
+        'VIBROSTAND':       '#06b6d4',
+        'TECH_CONTROL_1_1': '#eab308',
+        'TECH_CONTROL_1_2': '#eab308',
+        'FUNC_CONTROL':     '#f97316',
+        'TECH_CONTROL_2_1': '#eab308',
+        'TECH_CONTROL_2_2': '#eab308',
+        'PACKING':          '#14b8a6',
+        'ACCOUNTING':       '#8b5cf6',
+        'WAREHOUSE':        '#16a34a',
+        'REPAIR':           '#ef4444',
+        'WAITING_POOL':     '#64748b',
+    };
     try {
         const resp = await fetch('/api/scan/workplaces');
         const workplaces = await resp.json();
-        const sel = document.getElementById('workplaceSelect');
-        sel.innerHTML = '<option value="" disabled selected>-- Выберите рабочее место --</option>';
-        workplaces.forEach(wp => {
-            const opt = document.createElement('option');
-            opt.value = wp.id;
-            opt.textContent = `${wp.name} [${wp.type}]`;
-            sel.appendChild(opt);
-        });
+        const grid = document.getElementById('wpGrid');
+        if (!workplaces.length) {
+            grid.innerHTML = '<div class="text-muted" style="grid-column:1/-1;">Нет доступных рабочих мест</div>';
+            return;
+        }
+        grid.innerHTML = workplaces.map(wp => {
+            const icon  = ICONS[wp.workplace_type]  || '🖥';
+            const color = COLORS[wp.workplace_type] || '#6366f1';
+            return `<div class="wp-tile" onclick="selectWorkplace(${wp.id})" title="${wp.type}"
+                         style="--tile-color:${color}; animation-delay:${workplaces.indexOf(wp) * 40}ms">
+                <div class="wp-tile-icon">${icon}</div>
+                <div class="wp-tile-name">${escapeHTML(wp.name)}</div>
+                <div class="wp-tile-type">${escapeHTML(wp.type)}</div>
+            </div>`;
+        }).join('');
     } catch (e) {
-        alert('Ошибка загрузки рабочих мест: ' + e.message);
+        document.getElementById('wpGrid').innerHTML =
+            `<div class="text-muted" style="color:#ef4444; grid-column:1/-1;">⚠️ Ошибка: ${e.message}</div>`;
     }
 }
 
-async function startSession(e) {
-    e.preventDefault();
-    const wpId = document.getElementById('workplaceSelect').value;
-    
+async function selectWorkplace(wpId) {
+    // Подсвечиваем выбранную плитку
+    document.querySelectorAll('.wp-tile').forEach(t => t.classList.remove('selected'));
+    const tile = document.querySelector(`.wp-tile[onclick="selectWorkplace(${wpId})"]`);
+    if (tile) tile.classList.add('selected', 'loading');
+
     try {
         const resp = await fetch('/api/scan/start-session', {
             method: 'POST',
@@ -691,4 +724,58 @@ function verifySpecCode() {
     }
 }
 </script>
+
+<style>
+/* ─── Workplace tiles ─────────────────────────────────── */
+.wp-tile {
+    --tile-color: #6366f1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 20px 12px;
+    border-radius: 14px;
+    border: 2px solid color-mix(in srgb, var(--tile-color) 25%, transparent);
+    background: color-mix(in srgb, var(--tile-color) 8%, var(--card-bg, #1e293b));
+    cursor: pointer;
+    transition: all .2s cubic-bezier(.4,0,.2,1);
+    animation: tileIn .35s both;
+    user-select: none;
+    text-align: center;
+}
+@keyframes tileIn {
+    from { opacity:0; transform:translateY(12px) scale(.95); }
+    to   { opacity:1; transform:none; }
+}
+.wp-tile:hover {
+    border-color: var(--tile-color);
+    background: color-mix(in srgb, var(--tile-color) 18%, var(--card-bg, #1e293b));
+    transform: translateY(-3px);
+    box-shadow: 0 8px 24px color-mix(in srgb, var(--tile-color) 30%, transparent);
+}
+.wp-tile:active { transform: scale(.97); }
+.wp-tile.selected {
+    border-color: var(--tile-color);
+    background: color-mix(in srgb, var(--tile-color) 22%, var(--card-bg, #1e293b));
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--tile-color) 40%, transparent);
+}
+.wp-tile.loading .wp-tile-icon { animation: spin .7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.wp-tile-icon { font-size: 2rem; line-height: 1; }
+.wp-tile-name {
+    font-weight: 700;
+    font-size: 13px;
+    color: var(--text, #f1f5f9);
+    line-height: 1.2;
+}
+.wp-tile-type {
+    font-size: 11px;
+    color: var(--tile-color);
+    font-weight: 600;
+    letter-spacing: .3px;
+}
+/* ─────────────────────────────────────────────────────── */
+</style>
 {% endblock %}
