@@ -682,11 +682,84 @@ async function savePrRoute() {
     if (resp.ok) {
         const msg = document.getElementById('prSavemsg');
         if (msg) { msg.style.display = 'inline'; setTimeout(() => msg.style.display = 'none', 3000); }
+
+        // Показываем уведомление об автоматически переведённых устройствах
+        if (res.advanced_devices && res.advanced_devices.length > 0) {
+            const lines = res.advanced_devices.map(d => {
+                const fromLabel = Device_statusDisplay(d.from) || d.from;
+                const toLabel   = Device_statusDisplay(d.to)   || d.to;
+                return `• ${d.serial}: ${fromLabel} → ${toLabel}`;
+            });
+            const nextStage = res.advanced_devices[0]?.next_stage || '?';
+            showAdvancedDevicesModal(res.advanced_devices);
+        }
+
         // Перезагрузить чтобы обновить бейдж
         await loadPrDeviceRoute(prCurrent.projectId, prCurrent.deviceType);
     } else {
         alert(res.detail || 'Ошибка сохранения');
     }
+}
+
+// Таблица человекочитаемых статусов (из Device.STATUS_DISPLAY)
+const _STATUS_DISPLAY = {
+    'WAITING_KITTING': 'Ожидание комплектовки',
+    'PRE_PRODUCTION': 'Комплектовка',
+    'WAITING_ASSEMBLY': 'Ожидание сборки',
+    'ASSEMBLY': 'Сборка',
+    'WAITING_VIBROSTAND': 'Ожидание вибростенда',
+    'VIBROSTAND': 'Вибростенд',
+    'WAITING_TECH_CONTROL_1_1': 'Ожидание ОТК 1.1',
+    'TECH_CONTROL_1_1': 'ОТК 1.1',
+    'WAITING_TECH_CONTROL_1_2': 'Ожидание ОТК 1.2',
+    'TECH_CONTROL_1_2': 'ОТК 1.2',
+    'WAITING_FUNC_CONTROL': 'Ожидание функц. контроля',
+    'FUNC_CONTROL': 'Функц. контроль',
+    'WAITING_TECH_CONTROL_2_1': 'Ожидание ОТК 2.1',
+    'WAITING_TECH_CONTROL_2_2': 'Ожидание ОТК 2.2',
+    'WAITING_PACKING': 'Ожидание упаковки',
+    'WAITING_ACCOUNTING': 'Ожидание учёта',
+    'WAITING_WAREHOUSE': 'Ожидание склада',
+    'QC_PASSED': 'Завершено',
+};
+function Device_statusDisplay(s) { return _STATUS_DISPLAY[s] || s; }
+
+function showAdvancedDevicesModal(devices) {
+    const rows = devices.map(d =>
+        `<tr>
+            <td style="padding:6px 10px; font-weight:600;">${d.serial}</td>
+            <td style="padding:6px 10px; color:#94a3b8;">${Device_statusDisplay(d.from)}</td>
+            <td style="padding:6px; color:#6366f1;">&#x2192;</td>
+            <td style="padding:6px 10px; color:#22c55e; font-weight:600;">${Device_statusDisplay(d.to)}</td>
+        </tr>`
+    ).join('');
+    const modal = document.createElement('div');
+    modal.className = 'modal-overlay';
+    modal.style.display = 'flex';
+    modal.innerHTML = `
+        <div class="modal-card" style="max-width:560px; width:100%;">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
+                <h3 style="margin:0; color:#f59e0b;">&#x26A0;&#xFE0F; Устройства автоматически переведены</h3>
+                <button onclick="this.closest('.modal-overlay').remove()" style="background:none; border:none; cursor:pointer; font-size:20px;">&#x2715;</button>
+            </div>
+            <p style="font-size:13px; color:var(--text-muted); margin-bottom:12px;">
+                Удалённые этапы были ожидаемыми следующими для ${devices.length} устройств.
+                Система автоматически перевела их на следующий доступный этап маршрута.
+            </p>
+            <table style="width:100%; border-collapse:collapse; font-size:13px;">
+                <thead><tr style="border-bottom:1px solid var(--border);">
+                    <th style="padding:6px 10px; text-align:left;">SN</th>
+                    <th style="padding:6px 10px; text-align:left;">Было</th>
+                    <th></th>
+                    <th style="padding:6px 10px; text-align:left;">Стало</th>
+                </tr></thead>
+                <tbody>${rows}</tbody>
+            </table>
+            <div class="modal-buttons" style="margin-top:16px;">
+                <button class="btn btn-primary" onclick="this.closest('.modal-overlay').remove()">Понятно</button>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
 }
 
 async function resetPrRoute() {
