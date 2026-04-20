@@ -44,22 +44,25 @@
 
     <!-- Детали -->
     <div class="card" style="overflow-y:auto;" id="detailsPanel">
+        <!-- Кнопка Маршрутные листы (сверху) -->
+        <button id="btnRouteSheets" class="btn" style="display:none; width:100%; margin-bottom:14px;
+                background:rgba(99,102,241,.12); color:#6366f1; border:1px solid rgba(99,102,241,.3);"
+                onclick="openProjectRoutes()">
+            📋 Маршрутные листы
+        </button>
+
         <h3 id="detailsTitle" style="word-wrap: break-word;">Выберите элемент</h3>
-        
-        <!-- Статистика проекта -->
-        <div id="projectStats" style="display:none; gap:10px; margin-bottom: 20px;">
-            <div class="stat-mini" style="border:1px solid var(--border); padding:10px; border-radius:8px; flex:1;">
-                <div style="font-size:10px; font-weight:bold; color:var(--text-muted);">⚪ ОЖИД.</div>
-                <div style="font-size:18px; font-weight:bold;" id="statNotStarted">0</div>
+
+        <!-- Общая готовность проекта -->
+        <div id="projectStats" style="display:none; margin-bottom:16px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                <span style="font-size:13px; color:var(--text-muted);">&#x1F4CA; Готовность</span>
+                <span id="statPctLabel" style="font-size:18px; font-weight:800; color:#22c55e;">0%</span>
             </div>
-            <div class="stat-mini" style="border:1px solid var(--border); padding:10px; border-radius:8px; flex:1;">
-                <div style="font-size:10px; font-weight:bold; color:#3b82f6;">🟡 РАБОТ.</div>
-                <div style="font-size:18px; font-weight:bold;" id="statInWork">0</div>
+            <div style="background:var(--border); border-radius:8px; height:8px; overflow:hidden; margin-bottom:10px;">
+                <div id="statPctBar" style="height:100%; border-radius:8px; background:linear-gradient(90deg,#6366f1,#22c55e); width:0%; transition:width .5s ease;"></div>
             </div>
-            <div class="stat-mini" style="border:1px solid var(--border); padding:10px; border-radius:8px; flex:1;">
-                <div style="font-size:10px; font-weight:bold; color:var(--success);">🟢 ГОТОВ.</div>
-                <div style="font-size:18px; font-weight:bold;" id="statDone">0</div>
-            </div>
+            <div id="stageChips" style="display:flex; flex-wrap:wrap; gap:5px;"></div>
         </div>
 
         <table class="table" id="detailsTable" style="display:none;">
@@ -67,13 +70,10 @@
             <tbody id="detailsBody"></tbody>
         </table>
 
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:20px; flex-wrap:wrap; gap:8px;">
-            <button id="btnRouteSheets" class="btn" style="display:none;
-                    background:rgba(99,102,241,.12); color:#6366f1; border:1px solid rgba(99,102,241,.3);"
-                    onclick="openProjectRoutes()">
-                📋 Маршрутные листы
-            </button>
+        <div style="display:flex; flex-direction:column; gap:8px; margin-top:20px;">
             <button id="btnDelete" class="btn btn-danger" style="display:none;" onclick="deleteProject()">🗑 Удалить проект</button>
+            <button id="btnArchive" class="btn" style="display:none; background:rgba(245,158,11,.1); color:#f59e0b; border:1px solid rgba(245,158,11,.3);"
+                    onclick="archiveProject()">📦 Отправить в архив</button>
         </div>
     </div>
 </div>
@@ -221,19 +221,42 @@ function renderTree(filterText = '') {
             const tr = document.createElement('tr');
             tr.className = 'tree-row';
             tr.style.fontWeight = 'bold';
-            const isExpanded = !!ft; // Auto-expand if searching
-            
+            const isExpanded = !!ft;
+
+            // Процент в правой колонке
+            const pct = p.completion_pct ?? 0;
+            const pctColor = pct >= 100 ? '#22c55e' : pct > 50 ? '#3b82f6' : '#f59e0b';
+            const pctBadge = `<span style="padding:2px 8px; border-radius:20px; font-size:11px; font-weight:700;
+                background:${pctColor}22; color:${pctColor}; border:1px solid ${pctColor}44;">${pct}%</span>`;
+
             tr.innerHTML = `
                 <td>
-                    <button type="button" class="btn-toggle" onclick="toggleProject(${p.id}, event)" style="background:none; border:none; cursor:pointer; width:20px; font-weight:bold;">${isExpanded ? '▼' : '▶'}</button>
+                    <button type="button" class="btn-toggle" onclick="toggleProject(${p.id}, event)"
+                        style="background:none; border:none; cursor:pointer; width:20px; font-weight:bold;">${isExpanded ? '▼' : '▶'}</button>
                     <span onclick="loadDetails('project', ${p.id})">📁 ${escapeHTML(p.name)}</span>
                 </td>
                 <td onclick="loadDetails('project', ${p.id})">${escapeHTML(p.code || '')}</td>
-                <td onclick="loadDetails('project', ${p.id})"><span class="badge-color" style="background:${escapeHTML(p.badge_color)}">${escapeHTML(p.status_display)}</span></td>
+                <td onclick="loadDetails('project', ${p.id})">${pctBadge}</td>
                 <td onclick="loadDetails('project', ${p.id})"></td>
             `;
+
+            // Строка статистики по постам (раскрывается вместе с детьми)
+            const stageStats = p.stage_stats || [];
+            const chipsHtml = stageStats.map(s => {
+                const isDone = s.done >= s.total;
+                const bg = isDone ? '#22c55e22' : s.done > 0 ? '#3b82f622' : 'var(--border)';
+                const cl = isDone ? '#22c55e' : s.done > 0 ? '#3b82f6' : 'var(--text-muted)';
+                return `<span style="padding:2px 7px; border-radius:10px; font-size:11px; font-weight:600; background:${bg}; color:${cl}; white-space:nowrap;">${escapeHTML(s.short)} ${s.done}\u2215${s.total}</span>`;
+            }).join('');
+            const statsBarHTML = stageStats.length ? `
+                <tr class="tree-row child-of-${p.id}" style="${ft ? '' : 'display:none;'}">
+                    <td colspan="4" style="padding:4px 10px 8px 38px;">
+                        <div style="display:flex; flex-wrap:wrap; gap:4px; padding:2px 0;">${chipsHtml}</div>
+                    </td>
+                </tr>` : '';
+
             tbody.appendChild(tr);
-            tbody.insertAdjacentHTML('beforeend', cHTML);
+            tbody.insertAdjacentHTML('beforeend', statsBarHTML + cHTML);
         }
     });
 }
@@ -261,7 +284,8 @@ async function loadDetails(type, id) {
     else currentProjectId = null;
     
     document.getElementById('btnDelete').style.display      = type === 'project' ? 'inline-block' : 'none';
-    document.getElementById('btnRouteSheets').style.display  = type === 'project' ? 'inline-block' : 'none';
+    document.getElementById('btnArchive').style.display     = type === 'project' ? 'inline-block' : 'none';
+    document.getElementById('btnRouteSheets').style.display  = type === 'project' ? 'block' : 'none';
     if (type === 'project') document.getElementById('btnRouteSheets').dataset.pid = id;
     
     try {
@@ -277,10 +301,20 @@ async function loadDetails(type, id) {
         
         const pStats = document.getElementById('projectStats');
         if (type === 'project' && data.stats) {
-            document.getElementById('statNotStarted').textContent = data.stats.not_started;
-            document.getElementById('statInWork').textContent = data.stats.in_work;
-            document.getElementById('statDone').textContent = data.stats.done;
-            pStats.style.display = 'flex';
+            const pct = data.stats.completion_pct ?? 0;
+            document.getElementById('statPctLabel').textContent = pct + '%';
+            document.getElementById('statPctBar').style.width = pct + '%';
+            // Чипсы по постам
+            const chipsEl = document.getElementById('stageChips');
+            const stages = data.stats.stage_stats || [];
+            chipsEl.innerHTML = stages.map(s => {
+                const isDone = s.done >= s.total;
+                const hasWork = s.done > 0;
+                const bg = isDone ? 'rgba(34,197,94,.15)' : hasWork ? 'rgba(59,130,246,.12)' : 'var(--border)';
+                const cl = isDone ? '#22c55e'             : hasWork ? '#60a5fa'              : 'var(--text-muted)';
+                return `<span style="padding:3px 9px; border-radius:12px; font-size:12px; font-weight:700; background:${bg}; color:${cl};">${escapeHTML(s.short)} ${s.done}/${s.total}</span>`;
+            }).join('');
+            pStats.style.display = 'block';
         } else {
             pStats.style.display = 'none';
         }
@@ -309,6 +343,8 @@ async function deleteProject() {
             document.getElementById('detailsTable').style.display = 'none';
             document.getElementById('detailsTitle').textContent = 'Выберите элемент';
             document.getElementById('btnDelete').style.display = 'none';
+            document.getElementById('btnArchive').style.display = 'none';
+            document.getElementById('btnRouteSheets').style.display = 'none';
             document.getElementById('projectStats').style.display = 'none';
             loadTree();
         } else {
@@ -326,6 +362,29 @@ function openProjectRoutes() {
         ? `/route-configs?tab=projects&project=${pid}`
         : '/route-configs?tab=projects';
     window.location.href = url;
+}
+
+async function archiveProject() {
+    if (!currentProjectId) return;
+    if (!confirm('Отправить проект в архив? (Требуется: все устройства завершены + прошло 30 дней)')) return;
+    try {
+        const resp = await fetch(`/api/archive/projects/${currentProjectId}`, { method: 'POST' });
+        const res = await resp.json();
+        if (resp.ok) {
+            alert(res.message);
+            document.getElementById('detailsTable').style.display = 'none';
+            document.getElementById('detailsTitle').textContent = 'Выберите элемент';
+            document.getElementById('btnDelete').style.display      = 'none';
+            document.getElementById('btnArchive').style.display     = 'none';
+            document.getElementById('btnRouteSheets').style.display = 'none';
+            document.getElementById('projectStats').style.display   = 'none';
+            loadTree();
+        } else {
+            alert(res.detail || 'Ошибка архивирования');
+        }
+    } catch(e) {
+        alert('Ошибка сети: ' + e.message);
+    }
 }
 
 // ------ Форма создания ------
