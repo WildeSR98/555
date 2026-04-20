@@ -702,9 +702,18 @@ async function doAction(actionName, notes = '', targetStatus = null) {
             const res = await resp.json();
 
             if (actionName === 'scan_in') {
-                // После SCAN_IN — буфер очищается. Пользователь сканирует заново для Готово/Брак
-                state.devices = [];
-                showFeedback('success', res.message + ' Отсканируйте SN снова для завершения.');
+                // Авто-переход: оставляем устройства в буфере, обновляем статусы,
+                // сразу переключаем в фазу «Действие» (Готово / Брак) — без повторного скана
+                const statusMap = {};
+                (res.results || []).forEach(r => { statusMap[r.device_id] = r.new_status; });
+                state.devices = state.devices.map(d => ({
+                    ...d,
+                    needScanIn: false,
+                    status: statusMap[d.id] || d.status
+                }));
+                state.phase = 'action';
+                showFeedback('success', '📥 Принято в работу. Нажмите «Готово» для завершения.');
+
             } else {
                 // После action (complete/defect/semifinished) — удаляем из буфера
                 state.devices = state.devices.filter(d => !selectedIds.includes(d.id));
