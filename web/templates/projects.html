@@ -71,6 +71,11 @@
         </table>
 
         <div style="display:flex; flex-direction:column; gap:8px; margin-top:20px;">
+            <button id="btnGoToScan" class="btn" style="display:none;
+                    background:rgba(34,197,94,.12); color:#22c55e; border:1px solid rgba(34,197,94,.3);"
+                    onclick="goToScan()">
+                🔍 Перейти к сканированию
+            </button>
             <button id="btnDelete" class="btn btn-danger" style="display:none;" onclick="deleteProject()">🗑 Удалить проект</button>
             <button id="btnArchive" class="btn" style="display:none; background:rgba(245,158,11,.1); color:#f59e0b; border:1px solid rgba(245,158,11,.3);"
                     onclick="archiveProject()">📦 Отправить в архив</button>
@@ -152,6 +157,7 @@
 <script>
 let treeData = [];
 let currentProjectId = null;
+let currentDeviceSN   = null;  // СН выбранного устройства
 
 const deviceModels = JSON.parse(
     document.getElementById('device-models-data').textContent
@@ -282,10 +288,12 @@ function filterTree() {
 async function loadDetails(type, id) {
     if(type === 'project') currentProjectId = id;
     else currentProjectId = null;
-    
+    currentDeviceSN = null;
+
     document.getElementById('btnDelete').style.display      = type === 'project' ? 'inline-block' : 'none';
     document.getElementById('btnArchive').style.display     = type === 'project' ? 'inline-block' : 'none';
     document.getElementById('btnRouteSheets').style.display  = type === 'project' ? 'block' : 'none';
+    document.getElementById('btnGoToScan').style.display    = 'none';  // скроем по умолчанию
     if (type === 'project') document.getElementById('btnRouteSheets').dataset.pid = id;
     
     try {
@@ -304,7 +312,6 @@ async function loadDetails(type, id) {
             const pct = data.stats.completion_pct ?? 0;
             document.getElementById('statPctLabel').textContent = pct + '%';
             document.getElementById('statPctBar').style.width = pct + '%';
-            // Чипсы по постам
             const chipsEl = document.getElementById('stageChips');
             const stages = data.stats.stage_stats || [];
             chipsEl.innerHTML = stages.map(s => {
@@ -317,6 +324,12 @@ async function loadDetails(type, id) {
             pStats.style.display = 'block';
         } else {
             pStats.style.display = 'none';
+        }
+
+        // Кнопка прохода на скан — только для устройств с SN
+        if (type === 'device' && data.serial_number) {
+            currentDeviceSN = data.serial_number;
+            document.getElementById('btnGoToScan').style.display = 'inline-block';
         }
         
     } catch (e) {
@@ -362,6 +375,11 @@ function openProjectRoutes() {
         ? `/route-configs?tab=projects&project=${pid}`
         : '/route-configs?tab=projects';
     window.location.href = url;
+}
+
+function goToScan() {
+    if (!currentDeviceSN) return;
+    window.location.href = `/scan?prescan=${encodeURIComponent(currentDeviceSN)}`;
 }
 
 async function archiveProject() {

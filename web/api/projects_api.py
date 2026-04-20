@@ -190,6 +190,7 @@ def get_entity_details(entity_type: str, entity_id: int, db: Session = Depends(g
             
         return {
             "title": f"💻 Устройство: {device.name}",
+            "serial_number": device.serial_number,  # для кнопки «Перейти к сканированию»
             "fields": [
                 {"label": "Код", "value": device.code or "—"},
                 {"label": "Название", "value": device.name},

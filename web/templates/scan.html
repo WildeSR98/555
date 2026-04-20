@@ -247,10 +247,36 @@ function restoreState() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    if (!restoreState()) {
+    const restored = restoreState();
+    if (!restored) {
         loadWorkplaces();
     }
+    checkPrescan(restored);
 });
+
+// Авто-заполнение SN из URL-параметра ?prescan=SN
+function checkPrescan(sessionActive) {
+    const sn = new URLSearchParams(window.location.search).get('prescan');
+    if (!sn) return;
+    // чистим URL чтобы перезагрузка не триггерила повторно
+    history.replaceState({}, '', '/scan');
+
+    if (sessionActive && state.sessionId) {
+        // Смена активна: сразу сканируем
+        setTimeout(() => {
+            const inp = document.getElementById('snInput');
+            if (inp) {
+                inp.value = sn;
+                processScan({ preventDefault: () => {} });
+            }
+        }, 150);
+    } else {
+        // Смена не активна: запоминаем СН, показываем подсказку
+        window._pendingPrescan = sn;
+        document.getElementById('sessionStatus').innerHTML =
+            `⏳ Выберите рабочее место — затем автоматически сканируем <strong>${escapeHTML(sn)}</strong>`;
+    }
+}
 
 async function loadWorkplaces() {
     const ICONS = {
@@ -337,9 +363,23 @@ async function selectWorkplace(wpId) {
             document.getElementById('stepLogin').style.display = 'none';
             document.getElementById('stepWork').style.display = 'block';
             document.getElementById('sessionControls').style.display = 'block';
-            
+
             saveState();
-            document.getElementById('snInput').focus();
+
+            // Если есть ожидающий SN — заполняем и запускаем
+            const pendingSN = window._pendingPrescan;
+            if (pendingSN) {
+                window._pendingPrescan = null;
+                setTimeout(() => {
+                    const inp = document.getElementById('snInput');
+                    if (inp) {
+                        inp.value = pendingSN;
+                        processScan({ preventDefault: () => {} });
+                    }
+                }, 400);
+            } else {
+                document.getElementById('snInput').focus();
+            }
         } else {
             let msg = res.detail || 'Ошибка входа';
             if (Array.isArray(res.detail)) {
