@@ -454,18 +454,14 @@ async function deleteConfig(id) {
     }
 }
 
-loadConfigs();
 
-// Авто-переключение вкладки по URL-параметру (?tab=projects)
-if (new URLSearchParams(window.location.search).get('tab') === 'projects') {
-    switchTab('projects');
-}
+// ─── Auto-switch is deferred to after all declarations ───
+// (see bottom of script)
 
-// ══════════════════════════════════════════
-//  TAB SWITCHING
-// ══════════════════════════════════════════
-
-let _prLoaded = false;
+// TAB STATE — declared early to avoid TDZ
+var _prLoaded   = false;
+var prProjects  = [];
+var prCurrent   = null;
 
 function switchTab(tab) {
     ['routes', 'projects'].forEach(t => {
@@ -482,15 +478,28 @@ function switchTab(tab) {
 //  PROJECTS TAB — функции
 // ══════════════════════════════════════════
 
-let prProjects   = [];   // Список проектов
-let prCurrent    = null; // { projectId, deviceType }
+// prProjects and prCurrent declared above (before loadConfigs)
 
 async function loadPrProjects() {
+    const container = document.getElementById('prProjectList');
+    if (!container) return;
+    container.innerHTML = '<div class="text-muted" style="font-size:13px;">⏳ Загрузка...</div>';
     try {
         const resp = await fetch('/api/project-routes/projects');
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         prProjects = await resp.json();
+        if (!Array.isArray(prProjects)) throw new Error('Неверный формат ответа');
         renderPrProjectList();
-    } catch(e) { console.error(e); }
+    } catch(e) {
+        console.error('[loadPrProjects]', e);
+        container.innerHTML = `<div class="text-muted" style="font-size:13px; color:#ef4444;">
+            ⚠️ Ошибка загрузки: ${e.message}<br>
+            <button onclick="_prLoaded=false; loadPrProjects()" class="btn" style="margin-top:8px; font-size:12px; padding:4px 10px;">
+                🔄 Повторить
+            </button>
+        </div>`;
+        _prLoaded = false; // Сбрасываем чтобы при клике на таб снова загрузило
+    }
 }
 
 function renderPrProjectList() {
@@ -665,16 +674,23 @@ async function resetPrRoute() {
 // ── WS: авто-обновление при изменении маршрутов ──────────────────────────────
 let _rcRefreshTimer = null;
 window.addEventListener('ws:route_saved', () => {
-    // Перезагружаем список маршрутов если кто-то другой изменил
     clearTimeout(_rcRefreshTimer);
     _rcRefreshTimer = setTimeout(loadConfigs, 800);
 });
 window.addEventListener('ws:project_route_saved', () => {
-    // Обновляем список проектов если вкладка Проекты открыта
     if (document.getElementById('tabProjects-panel')?.style.display !== 'none') {
         clearTimeout(_rcRefreshTimer);
         _rcRefreshTimer = setTimeout(loadPrProjects, 800);
     }
 });
+
+// ── Инициализация (после всех деклараций) ────────────────────────────────────
+loadConfigs();
+
+// Авто-переключение вкладки по URL-параметру (?tab=projects)
+// Помещено ПОСЛЕ всех деклараций чтобы избежать TDZ
+if (new URLSearchParams(window.location.search).get('tab') === 'projects') {
+    switchTab('projects');
+}
 </script>
 {% endblock %}

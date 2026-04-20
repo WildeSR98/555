@@ -103,29 +103,34 @@ class SaveProjectRouteBody(BaseModel):
 
 @router.get("/projects")
 def list_projects(db: Session = Depends(get_db)):
-    """Список проектов с кол-вом типов устройств (для аккордеона во вкладке Проекты)."""
-    projects = db.query(Project).order_by(Project.name).all()
+    """Список активных проектов с устройствами (для аккордеона во вкладке Проекты)."""
+    projects = (
+        db.query(Project)
+        .filter(Project.status != 'ARCHIVED')
+        .order_by(Project.name)
+        .all()
+    )
     result = []
     for p in projects:
-        # Уникальные типы устройств в проекте
+        # Уникальные типы устройств в проекте (включая None → заменяем на 'UNKNOWN')
         types_q = (
             db.query(Device.device_type)
             .filter(Device.project_id == p.id)
             .distinct()
             .all()
         )
-        device_types = [t[0] for t in types_q if t[0]]
+        device_types = [t[0] or 'UNKNOWN' for t in types_q]
 
         if not device_types:
             continue  # Проекты без устройств скрываем
 
         result.append({
-            "id":     p.id,
-            "name":   p.name,
-            "code":   p.code or "",
-            "status": p.status,
+            "id":             p.id,
+            "name":           p.name,
+            "code":           p.code or "",
+            "status":         p.status,
             "status_display": p.status_display,
-            "device_types": device_types,
+            "device_types":   device_types,
         })
     return result
 
