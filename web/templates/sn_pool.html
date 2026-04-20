@@ -465,5 +465,10 @@ async function submitEditCategory(e) {
         }
     } catch(e) { alert(e.message); }
 }
+
+// WS: авто-обновление дерева при изменении категорий или моделей другим пользователем
+window.addEventListener('ws:sn_pool_updated', () => {
+    loadTree();
+});
 </script>
 {% endblock %}

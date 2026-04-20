@@ -632,6 +632,7 @@ class RouteConfigStage(Base):
     stage_key        = Column(String(50), nullable=False)   # напр. ASSEMBLY
     order_index      = Column(Integer, nullable=False)
     is_enabled       = Column(Boolean, default=True)
+    label            = Column(String(100), nullable=True)   # кастомный ярлык (напр. «Комплектовка-доукомплектование»)
 
     route_config = relationship('RouteConfig', back_populates='stages')
 

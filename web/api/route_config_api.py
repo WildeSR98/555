@@ -14,6 +14,7 @@ from src.models import (
     ProjectRoute, ROUTE_PIPELINE_STAGES, User, Project
 )
 from web.dependencies import get_current_user
+from web.ws_manager import manager as ws_manager
 
 router = APIRouter()
 
@@ -42,7 +43,7 @@ def _serialize(rc: RouteConfig) -> dict:
                 "stage_key":   s.stage_key,
                 "order_index": s.order_index,
                 "is_enabled":  s.is_enabled,
-                "label":       next(
+                "label":       s.label or next(
                     (lbl for k, lbl, _ in ROUTE_PIPELINE_STAGES if k == s.stage_key),
                     s.stage_key[8:] if s.stage_key.startswith('CUSTOM::') else s.stage_key
                 ),
@@ -60,6 +61,7 @@ class StageInput(BaseModel):
     stage_key: str
     is_enabled: bool
     order_index: Optional[int] = None  # позиция после drag-and-drop
+    label: Optional[str] = None        # кастомный ярлык (напр. «Комплектовка-доукомплектование»)
 
 
 class RouteConfigCreate(BaseModel):
@@ -154,7 +156,7 @@ def get_route_config(config_id: int, db: Session = Depends(get_db)):
 
 
 @router.put("/{config_id}")
-def update_route_config(
+async def update_route_config(
     config_id: int,
     data: RouteConfigUpdate,
     db: Session = Depends(get_db),
@@ -185,9 +187,15 @@ def update_route_config(
                 stage_key=s.stage_key,
                 order_index=order_idx,
                 is_enabled=s.is_enabled,
+                label=s.label or None,
             ))
 
     db.commit()
+    await ws_manager.broadcast({
+        "type":       "route_saved",
+        "id":         rc.id,
+        "route_name": rc.name,
+    })
     return {"ok": True, "message": f"Маршрут «{rc.name}» обновлён"}
 
 

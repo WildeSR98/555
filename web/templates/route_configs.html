@@ -97,6 +97,15 @@
 .pr-dtype-item .override-dot { width:6px; height:6px; border-radius:50%; background:#22c55e; flex-shrink:0; }
 .pr-override-badge { font-size:10px; padding:1px 5px; border-radius:3px; background:rgba(34,197,94,.15); color:#22c55e; }
 .actions-bar { display:flex; gap:10px; margin-top:20px; padding-top:16px; border-top:1px solid var(--border); flex-wrap:wrap; }
+/* ── Stage Adder & Rename ── */
+.add-stage-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(155px,1fr)); gap:10px; margin-top:14px; }
+.add-stage-card { padding:10px 14px; border-radius:8px; border:1px solid var(--border); cursor:pointer; transition:all .15s; }
+.add-stage-card:hover:not(.used) { border-color:#6366f1; background:rgba(99,102,241,.1); transform:translateY(-1px); }
+.add-stage-card.used { opacity:.4; cursor:not-allowed; }
+.btn-rename { background:none; border:none; cursor:pointer; color:#6366f1; font-size:13px; padding:0 4px; opacity:0; transition:opacity .15s; flex-shrink:0; }
+.stage-row:hover .btn-rename { opacity:1; }
+.btn-remove-stage { background:none; border:none; cursor:pointer; color:#ef4444; font-size:15px; padding:0 0 0 2px; opacity:0; transition:opacity .15s; flex-shrink:0; }
+.stage-row:hover .btn-remove-stage { opacity:1; }
 </style>
 {% endblock %}
 
@@ -204,6 +213,45 @@
         </div>
     </div>
 </div>
+
+<!-- ─── Модалка выбора этапа ─── -->
+<div class="modal-overlay" id="stageAdderModal" style="display:none;">
+    <div class="modal-card" style="max-width:620px; width:100%;">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
+            <h3 style="margin:0;">&#x2795; Добавить этап</h3>
+            <button onclick="closeModal('stageAdderModal')" style="background:none; border:none; cursor:pointer; font-size:20px; color:var(--text-muted);">&#x2715;</button>
+        </div>
+        <p style="font-size:13px; color:var(--text-muted); margin-bottom:14px;">Выберите из 11 стандартных этапов конвейера</p>
+        <div id="stageAdderGrid" class="add-stage-grid"></div>
+    </div>
+</div>
+
+<!-- ─── Модалка переименования этапа ─── -->
+<div class="modal-overlay" id="stageRenameModal" style="display:none;">
+    <div class="modal-card" style="max-width:440px; width:100%;">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
+            <h3 style="margin:0;">&#x270F;&#xFE0F; Переименовать этап</h3>
+            <button onclick="closeModal('stageRenameModal')" style="background:none; border:none; cursor:pointer; font-size:20px; color:var(--text-muted);">&#x2715;</button>
+        </div>
+        <p style="font-size:13px; color:var(--text-muted); margin-bottom:14px;">Базовое название сохраняется. Добавьте уточнение — оно отобразится через дефис.</p>
+        <div style="display:flex; align-items:center; gap:8px; padding:12px; border-radius:8px; background:rgba(99,102,241,.07); margin-bottom:12px;">
+            <span id="renameBaseLabel" style="font-weight:700; font-size:15px; white-space:nowrap; color:var(--text);"></span>
+            <span style="color:var(--text-muted); font-size:18px; font-weight:300;">-</span>
+            <input id="renameSuffix" class="form-control"
+                   placeholder="доукомплектование (пусто — сброс)"
+                   style="flex:1; font-size:14px;"
+                   onkeydown="if(event.key==='Enter')confirmRename();"
+                   oninput="updateRenamePreview()">
+        </div>
+        <div style="font-size:12px; color:var(--text-muted); margin-bottom:16px;">
+            &#x1F4A1; Итог: <strong id="renamePreview" style="color:var(--text);"></strong>
+        </div>
+        <div class="modal-buttons">
+            <button class="btn" style="background:var(--border);" onclick="closeModal('stageRenameModal')">Отмена</button>
+            <button class="btn btn-primary" onclick="confirmRename()">&#x2713; Сохранить</button>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
@@ -250,52 +298,48 @@ function renderEditor() {
             <div>
                 <h2 style="margin:0; font-size:20px;">${rc.name}</h2>
                 <div style="margin-top:4px;">
-                    ${rc.device_type ? `<span class="device-type-badge">📦 ${rc.device_type}</span>` : ''}
+                    ${rc.device_type ? `<span class="device-type-badge">&#x1F4E6; ${rc.device_type}</span>` : ''}
                     ${rc.is_default ? `<span class="rc-badge" style="background:#7c3aed; margin-left:6px;">Стандартный</span>` : ''}
                 </div>
             </div>
-            ${canEdit && !isDefault ? `<button class="btn btn-sm btn-danger" onclick="deleteConfig(${rc.id})">🗑 Удалить</button>` : ''}
+            ${canEdit && !isDefault ? `<button class="btn btn-sm btn-danger" onclick="deleteConfig(${rc.id})">&#x1F5D1; Удалить</button>` : ''}
         </div>
         <div class="editor-meta">
             ${rc.description ? `<p style="margin:0 0 8px;">${rc.description}</p>` : ''}
-            ${isDefault ? `<div style="color:#7c3aed; font-size:12px;">⚠️ Дефолтный маршрут — только для просмотра</div>` : ''}
+            ${isDefault ? `<div style="color:#7c3aed; font-size:12px;">&#x26A0;&#xFE0F; Дефолтный маршрут — только для просмотра</div>` : ''}
         </div>
 
         <div id="stagesList">
-            ${rc.stages.map((s, idx) =>
-            `<div class="stage-row ${!s.is_enabled ? 'disabled-stage' : ''} ${s.is_custom ? 'custom-stage' : ''}"
-                  data-key="${s.stage_key}" draggable="${canEdit && !isDefault ? 'true' : 'false'}">
-                ${canEdit && !isDefault
-                    ? `<span class="drag-handle" title="Перетащить">⠿</span>`
-                    : ''}
-                <span class="stage-num">${idx + 1}.</span>
-                <span class="stage-name">
-                    ${s.label}
-                    ${s.is_custom ? `<span style="font-size:10px; background:rgba(99,102,241,.15); color:#6366f1; padding:1px 5px; border-radius:3px; margin-left:4px;">польз. этап</span>` : ''}
-                </span>
-                <span class="stage-status">${s.is_enabled ? '● Активен' : '○ Пропуск'}</span>
-                ${canEdit && !isDefault ? `
-                <label class="toggle-switch">
-                    <input type="checkbox" ${s.is_enabled ? 'checked' : ''}
-                           onchange="toggleStage('${s.stage_key}', this.checked)">
-                    <span class="toggle-slider"></span>
-                </label>
-                ${s.is_custom
-                    ? `<button onclick="removeCustomStage('${s.stage_key}')" title="Удалить этап"
-                           style="background:none; border:none; cursor:pointer; color:#ef4444; font-size:16px; padding:0 0 0 8px;">✕</button>`
-                    : ''}
-                ` : ''}
-            </div>`).join('')}
+            ${rc.stages.map((s, idx) => {
+                const baseLabel = getBaseLabel(s.stage_key);
+                const displayLabel = s.label || baseLabel;
+                return `<div class="stage-row ${!s.is_enabled ? 'disabled-stage' : ''}"
+                      data-key="${s.stage_key}" draggable="${canEdit && !isDefault ? 'true' : 'false'}">
+                    ${canEdit && !isDefault ? `<span class="drag-handle" title="Перетащить">&#x28FF;</span>` : ''}
+                    <span class="stage-num">${idx + 1}.</span>
+                    <span class="stage-name">${displayLabel}</span>
+                    <span class="stage-status">${s.is_enabled ? '&#x25CF; Активен' : '&#x25CB; Пропуск'}</span>
+                    ${canEdit && !isDefault ? `
+                    <button class="btn-rename" onclick="showRenameModal('${s.stage_key}','global')" title="Переименовать">&#x270F;&#xFE0F;</button>
+                    <label class="toggle-switch">
+                        <input type="checkbox" ${s.is_enabled ? 'checked' : ''}
+                               onchange="toggleStage('${s.stage_key}', this.checked)">
+                        <span class="toggle-slider"></span>
+                    </label>
+                    <button class="btn-remove-stage" onclick="removeStage('${s.stage_key}')" title="Убрать из маршрута">&#x2715;</button>
+                    ` : ''}
+                </div>`;
+            }).join('')}
         </div>
 
         ${canEdit && !isDefault ? `
         <div class="actions-bar">
-            <button class="btn btn-primary" onclick="saveConfig()">💾 Сохранить</button>
-            <button class="btn" onclick="addCustomStage()"
+            <button class="btn btn-primary" onclick="saveConfig()">&#x1F4BE; Сохранить</button>
+            <button class="btn" onclick="showStageAdder('global')"
                     style="background:rgba(99,102,241,.12); color:#6366f1; border:1px solid rgba(99,102,241,.3);">
-                ➕ Добавить этап
+                &#x2795; Добавить этап
             </button>
-            <span id="savemsg" style="font-size:13px; color:#22c55e; display:none;">✓ Сохранено</span>
+            <span id="savemsg" style="font-size:13px; color:#22c55e; display:none;">&#x2713; Сохранено</span>
         </div>` : ''}
     `;
     renderList();
@@ -314,29 +358,7 @@ function toggleStage(key, enabled) {
     }
 }
 
-function addCustomStage() {
-    const name = prompt('Название нового этапа (напр. "Калибровка датчиков"):');
-    if (!name || !name.trim()) return;
-    const key = 'CUSTOM::' + name.trim();
-    // Проверяем что этап ещё не существует
-    if (currentConfig.stages.some(s => s.stage_key === key)) {
-        alert('Этап с таким названием уже есть'); return;
-    }
-    currentConfig.stages.push({
-        stage_key:  key,
-        is_enabled: true,
-        order_index: currentConfig.stages.length + 1,
-        label:      name.trim(),
-        is_custom:  true,
-    });
-    renderEditor(currentConfig);
-}
-
-function removeCustomStage(key) {
-    if (!key.startsWith('CUSTOM::')) return;
-    currentConfig.stages = currentConfig.stages.filter(s => s.stage_key !== key);
-    renderEditor(currentConfig);
-}
+// addCustomStage / removeCustomStage replaced by showStageAdder / removeStage below
 
 // ─── Drag & Drop ───
 let _dragSrcKey = null;
@@ -392,11 +414,12 @@ function initDragDrop() {
 }
 
 async function saveConfig() {
-    // Отправляем order_index по позиции в массиве после drag-and-drop
+    // Отправляем order_index + label по позиции в массиве после drag-and-drop
     const stages = currentConfig.stages.map((s, idx) => ({
         stage_key:   s.stage_key,
         is_enabled:  s.is_enabled,
         order_index: idx + 1,
+        label:       (s.label && s.label !== getBaseLabel(s.stage_key)) ? s.label : null,
     }));
     const res = await fetch(`/api/route-configs/${currentConfig.id}`, {
         method: 'PUT',
@@ -454,18 +477,14 @@ async function deleteConfig(id) {
     }
 }
 
-loadConfigs();
 
-// Авто-переключение вкладки по URL-параметру (?tab=projects)
-if (new URLSearchParams(window.location.search).get('tab') === 'projects') {
-    switchTab('projects');
-}
+// ─── Auto-switch is deferred to after all declarations ───
+// (see bottom of script)
 
-// ══════════════════════════════════════════
-//  TAB SWITCHING
-// ══════════════════════════════════════════
-
-let _prLoaded = false;
+// TAB STATE — declared early to avoid TDZ
+var _prLoaded   = false;
+var prProjects  = [];
+var prCurrent   = null;
 
 function switchTab(tab) {
     ['routes', 'projects'].forEach(t => {
@@ -482,15 +501,28 @@ function switchTab(tab) {
 //  PROJECTS TAB — функции
 // ══════════════════════════════════════════
 
-let prProjects   = [];   // Список проектов
-let prCurrent    = null; // { projectId, deviceType }
+// prProjects and prCurrent declared above (before loadConfigs)
 
 async function loadPrProjects() {
+    const container = document.getElementById('prProjectList');
+    if (!container) return;
+    container.innerHTML = '<div class="text-muted" style="font-size:13px;">⏳ Загрузка...</div>';
     try {
         const resp = await fetch('/api/project-routes/projects');
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         prProjects = await resp.json();
+        if (!Array.isArray(prProjects)) throw new Error('Неверный формат ответа');
         renderPrProjectList();
-    } catch(e) { console.error(e); }
+    } catch(e) {
+        console.error('[loadPrProjects]', e);
+        container.innerHTML = `<div class="text-muted" style="font-size:13px; color:#ef4444;">
+            ⚠️ Ошибка загрузки: ${e.message}<br>
+            <button onclick="_prLoaded=false; loadPrProjects()" class="btn" style="margin-top:8px; font-size:12px; padding:4px 10px;">
+                🔄 Повторить
+            </button>
+        </div>`;
+        _prLoaded = false; // Сбрасываем чтобы при клике на таб снова загрузило
+    }
 }
 
 function renderPrProjectList() {
@@ -551,6 +583,8 @@ async function loadPrDeviceRoute(projectId, deviceType) {
 }
 
 function renderPrEditor(data) {
+    const { stages, ...meta } = data;
+    prCurrent._lastData = meta;            // метаданные без stages
     const editor = document.getElementById('prEditor');
     const isOverride = data.is_override;
     const canEdit = document.getElementById('rc-page-meta')?.dataset.canEdit === 'true';
@@ -560,49 +594,56 @@ function renderPrEditor(data) {
             <div>
                 <h2 style="margin:0; font-size:20px;">
                     ${escapeHTML(data.project_name)}
-                    <span style="font-size:14px; font-weight:400; color:var(--text-muted);">→</span>
-                    <span class="device-type-badge">📦 ${escapeHTML(data.type_display)}</span>
+                    <span style="font-size:14px; font-weight:400; color:var(--text-muted);">&#x2192;</span>
+                    <span class="device-type-badge">&#x1F4E6; ${escapeHTML(data.type_display)}</span>
                 </h2>
                 <div style="margin-top:6px; font-size:13px; color:var(--text-muted);">
-                    ${data.device_count} устройств · 
+                    ${data.device_count} устройств &#xB7;
                     ${isOverride
-                        ? '<span style="color:#22c55e;">✓ Индивидуальный маршрут</span>'
+                        ? '<span style="color:#22c55e;">&#x2713; Индивидуальный маршрут</span>'
                         : '<span style="color:#94a3b8;">Используется глобальный маршрут</span>'}
                 </div>
             </div>
         </div>
 
         <div id="prStagesList">
-            ${data.stages.map((s, idx) => `
-            <div class="stage-row ${!s.is_enabled ? 'disabled-stage' : ''} ${s.is_custom ? 'custom-stage' : ''}"
-                 data-key="${s.stage_key}">
-                <span class="stage-num">${idx + 1}.</span>
-                <span class="stage-name">
-                    ${escapeHTML(s.label)}
-                    ${s.is_custom ? `<span style="font-size:10px; background:rgba(99,102,241,.15); color:#6366f1; padding:1px 5px; border-radius:3px; margin-left:4px;">польз. этап</span>` : ''}
-                </span>
-                <span class="stage-status">${s.is_enabled ? '● Активен' : '○ Пропуск'}</span>
-                ${canEdit ? `
-                <label class="toggle-switch">
-                    <input type="checkbox" ${s.is_enabled ? 'checked' : ''}
-                           onchange="prToggleStage('${s.stage_key}', this.checked)">
-                    <span class="toggle-slider"></span>
-                </label>` : ''}
-            </div>`).join('')}
+            ${stages.map((s, idx) => {
+                const displayLabel = s.label || getBaseLabel(s.stage_key);
+                return `<div class="stage-row ${!s.is_enabled ? 'disabled-stage' : ''}"
+                     data-key="${s.stage_key}" draggable="${canEdit ? 'true' : 'false'}">
+                    ${canEdit ? `<span class="drag-handle" title="\u041f\u0435\u0440\u0435\u0442\u0430\u0449\u0438\u0442\u044c">&#x28FF;</span>` : ''}
+                    <span class="stage-num">${idx + 1}.</span>
+                    <span class="stage-name">${escapeHTML(displayLabel)}</span>
+                    <span class="stage-status">${s.is_enabled ? '&#x25CF; \u0410\u043a\u0442\u0438\u0432\u0435\u043d' : '&#x25CB; \u041f\u0440\u043e\u043f\u0443\u0441\u043a'}</span>
+                    ${canEdit ? `
+                    <button class="btn-rename" onclick="showRenameModal('${s.stage_key}','project')" title="\u041f\u0435\u0440\u0435\u0438\u043c\u0435\u043d\u043e\u0432\u0430\u0442\u044c">&#x270F;&#xFE0F;</button>
+                    <label class="toggle-switch">
+                        <input type="checkbox" ${s.is_enabled ? 'checked' : ''}
+                               onchange="prToggleStage('${s.stage_key}', this.checked)">
+                        <span class="toggle-slider"></span>
+                    </label>
+                    <button class="btn-remove-stage" onclick="removePrStage('${s.stage_key}')" title="\u0423\u0431\u0440\u0430\u0442\u044c">&#x2715;</button>
+                    ` : ''}
+                </div>`;
+            }).join('')}
         </div>
 
         ${canEdit ? `
         <div class="actions-bar">
-            <button class="btn btn-primary" onclick="savePrRoute()">💾 Сохранить для проекта</button>
+            <button class="btn btn-primary" onclick="savePrRoute()">&#x1F4BE; Сохранить для проекта</button>
+            <button class="btn" onclick="showStageAdder('project')"
+                    style="background:rgba(99,102,241,.12); color:#6366f1; border:1px solid rgba(99,102,241,.3);">
+                &#x2795; Добавить этап
+            </button>
             ${isOverride ? `<button class="btn" onclick="resetPrRoute()"
                     style="background:rgba(239,68,68,.1); color:#ef4444; border:1px solid rgba(239,68,68,.3);">
-                ↺ Сбросить до глобального</button>` : ''}
-            <span id="prSavemsg" style="font-size:13px; color:#22c55e; display:none;">✓ Сохранено</span>
+                &#x21BA; Сбросить до глобального</button>` : ''}
+            <span id="prSavemsg" style="font-size:13px; color:#22c55e; display:none;">&#x2713; Сохранено</span>
         </div>` : ''}
     `;
 
-    // Сохраняем текущие stages в prCurrent
-    prCurrent.stages = data.stages.map(s => ({...s}));
+    prCurrent.stages = stages.map(s => ({...s}));
+    if (canEdit) initPrDragDrop();
 }
 
 function escapeHTML(str) {
@@ -630,7 +671,7 @@ async function savePrRoute() {
         stage_key:   s.stage_key,
         is_enabled:  s.is_enabled,
         order_index: idx + 1,
-        label: s.is_custom ? s.label : undefined,
+        label:       (s.label && s.label !== getBaseLabel(s.stage_key)) ? s.label : null,
     }));
     const resp = await fetch(`/api/project-routes/${prCurrent.projectId}/device/${prCurrent.deviceType}`, {
         method: 'PUT',
@@ -660,6 +701,247 @@ async function resetPrRoute() {
     } else {
         alert(res.detail || 'Ошибка сброса');
     }
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  11 СТАНДАРТНЫХ ЭТАПОВ КОНВЕЙЕРА
+// ══════════════════════════════════════════════════════════════════
+const PIPELINE_STAGES = [
+    { key: 'KITTING',          label: '\u041a\u043e\u043c\u043f\u043b\u0435\u043a\u0442\u043e\u0432\u043a\u0430'     },
+    { key: 'ASSEMBLY',         label: '\u0421\u0431\u043e\u0440\u043a\u0430'           },
+    { key: 'VIBROSTAND',       label: '\u0412\u0438\u0431\u0440\u043e\u0441\u0442\u0435\u043d\u0434'       },
+    { key: 'TECH_CONTROL_1_1', label: '\u041e\u0422\u041a 1.1'          },
+    { key: 'TECH_CONTROL_1_2', label: '\u041e\u0422\u041a 1.2'          },
+    { key: 'FUNC_CONTROL',     label: '\u0424\u0443\u043d\u043a\u0446. \u043a\u043e\u043d\u0442\u0440\u043e\u043b\u044c'  },
+    { key: 'TECH_CONTROL_2_1', label: '\u041e\u0422\u041a 2.1'          },
+    { key: 'TECH_CONTROL_2_2', label: '\u041e\u0422\u041a 2.2'          },
+    { key: 'PACKING',          label: '\u0423\u043f\u0430\u043a\u043e\u0432\u043a\u0430'         },
+    { key: 'ACCOUNTING',       label: '\u0423\u0447\u0451\u0442'             },
+    { key: 'WAREHOUSE',        label: '\u0421\u043a\u043b\u0430\u0434'            },
+];
+
+function getBaseLabel(key) {
+    // Handle duplicate stages like FUNC_CONTROL::2
+    const baseKey = key.includes('::') ? key.split('::')[0] : key;
+    return PIPELINE_STAGES.find(p => p.key === baseKey)?.label || baseKey;
+}
+function getSuffix(label, baseLabel) {
+    if (!label || label === baseLabel) return '';
+    if (label.startsWith(baseLabel + '-')) return label.slice(baseLabel.length + 1);
+    return '';
+}
+
+// ─── Stage Adder ───────────────────────────────────────────────────
+var _stageAdderCtx = 'global';
+
+function showStageAdder(ctx) {
+    _stageAdderCtx = ctx;
+    const current = ctx === 'global' ? (currentConfig?.stages || []) : (prCurrent?.stages || []);
+
+    // Count instances of each base key (handles ::N duplicates)
+    const usedCounts = {};
+    current.forEach(s => {
+        const base = s.stage_key.includes('::') ? s.stage_key.split('::')[0] : s.stage_key;
+        usedCounts[base] = (usedCounts[base] || 0) + 1;
+    });
+
+    document.getElementById('stageAdderGrid').innerHTML = PIPELINE_STAGES.map(ps => {
+        const count = usedCounts[ps.key] || 0;
+        const badge = count > 0
+            ? `<div style="font-size:10px; color:#6366f1; margin-top:5px; font-weight:600;">
+                 &#x2b; Добавить ещё (уже ${count} в маршруте)
+               </div>`
+            : '';
+        return `<div class="add-stage-card" onclick="addStageFromPicker('${ps.key}')">
+            <div style="font-weight:600; font-size:14px;">${ps.label}</div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:3px;">${ps.key}</div>
+            ${badge}
+        </div>`;
+    }).join('');
+    document.getElementById('stageAdderModal').style.display = 'flex';
+}
+
+function addStageFromPicker(key) {
+    const ps = PIPELINE_STAGES.find(p => p.key === key);
+    if (!ps) return;
+
+    const targetStages = _stageAdderCtx === 'global' ? currentConfig.stages : prCurrent.stages;
+
+    // Count existing instances of this base key (incl. ::N duplicates)
+    const existingCount = targetStages.filter(s =>
+        (s.stage_key.includes('::') ? s.stage_key.split('::')[0] : s.stage_key) === key
+    ).length;
+
+    // KEY for first, KEY::2 for second, KEY::3 for third, etc.
+    const newKey   = existingCount === 0 ? key : `${key}::${existingCount + 1}`;
+    // Auto-label: "Функц. контроль", "Функц. контроль-2", ...
+    const newLabel = existingCount === 0 ? ps.label : `${ps.label}-${existingCount + 1}`;
+
+    const stage = { stage_key: newKey, is_enabled: true, order_index: 999, label: newLabel, is_custom: false };
+
+    if (_stageAdderCtx === 'global') {
+        currentConfig.stages.push(stage);
+        renderEditor();
+    } else {
+        prCurrent.stages.push(stage);
+        renderPrEditor({ ...prCurrent._lastData, stages: prCurrent.stages });
+    }
+    closeModal('stageAdderModal');
+}
+
+// ─── Stage Rename ───────────────────────────────────────────────────
+var _renameKey = null, _renameCtx = 'global';
+
+function showRenameModal(key, ctx) {
+    _renameKey = key; _renameCtx = ctx;
+    const baseLabel = getBaseLabel(key);
+    const stages = ctx === 'global' ? currentConfig.stages : prCurrent.stages;
+    const curLabel = stages.find(s => s.stage_key === key)?.label || baseLabel;
+    document.getElementById('renameBaseLabel').textContent = baseLabel;
+    const inp = document.getElementById('renameSuffix');
+    inp.value = getSuffix(curLabel, baseLabel);
+    updateRenamePreview();
+    document.getElementById('stageRenameModal').style.display = 'flex';
+    setTimeout(() => inp.focus(), 80);
+}
+
+function updateRenamePreview() {
+    const base   = document.getElementById('renameBaseLabel').textContent;
+    const suffix = document.getElementById('renameSuffix').value.trim();
+    document.getElementById('renamePreview').textContent = suffix ? `${base}-${suffix}` : base;
+}
+
+function confirmRename() {
+    const base     = document.getElementById('renameBaseLabel').textContent;
+    const suffix   = document.getElementById('renameSuffix').value.trim();
+    const newLabel = suffix ? `${base}-${suffix}` : base;
+    const stages   = _renameCtx === 'global' ? currentConfig.stages : prCurrent.stages;
+    const s = stages.find(x => x.stage_key === _renameKey);
+    if (s) {
+        s.label = newLabel;
+        const listId = _renameCtx === 'global' ? 'stagesList' : 'prStagesList';
+        const row = document.querySelector(`#${listId} [data-key="${_renameKey}"]`);
+        if (row) { const el = row.querySelector('.stage-name'); if (el) el.textContent = newLabel; }
+    }
+    closeModal('stageRenameModal');
+}
+
+// ─── Remove Stage (global) ───────────────────────────────────────────────────
+function removeStage(key) {
+    const idx = currentConfig.stages.findIndex(s => s.stage_key === key);
+    if (idx < 0) return;
+    const name = currentConfig.stages[idx].label || getBaseLabel(key);
+    if (!confirm(
+        `Убрать «${name}» из глобального маршрута?\n\n` +
+        `\u0423стройства, ожидающие этот этап, пропустят его при следующем сканировании.`
+    )) return;
+    currentConfig.stages = currentConfig.stages.filter(s => s.stage_key !== key);
+    renderEditor();
+}
+
+// ─── Remove Stage (project) — async, checks affected devices ────────────────
+async function removePrStage(key) {
+    const stages = prCurrent.stages;
+    const idx = stages.findIndex(s => s.stage_key === key);
+    if (idx < 0) return;
+    const stageName = stages[idx].label || getBaseLabel(key);
+
+    // Call API to check affected devices
+    let affectedInfo = null;
+    if (prCurrent?.projectId && prCurrent?.deviceType) {
+        try {
+            const resp = await fetch(
+                `/api/project-routes/${prCurrent.projectId}/device/${prCurrent.deviceType}/check-remove?stage=${encodeURIComponent(key)}`
+            );
+            if (resp.ok) affectedInfo = await resp.json();
+        } catch(e) { console.warn('[check-remove]', e); }
+    }
+
+    if (affectedInfo && affectedInfo.affected_count > 0) {
+        const { affected_count, device_serials, has_more } = affectedInfo;
+        // Find next enabled stage after the removed one
+        const nextIdx = stages.findIndex((s, i) => i > idx && s.is_enabled);
+        const nextName = nextIdx >= 0
+            ? (stages[nextIdx].label || getBaseLabel(stages[nextIdx].stage_key))
+            : 'конец маршрута';
+        const serialsStr = device_serials.slice(0, 5).join(', ') +
+            (has_more || affected_count > 5 ? ` и ещё ${affected_count - 5}...` : '');
+        const ok = confirm(
+            `⚠️ ВНИМАНИЕ: ${affected_count} устройств ожидают этап «${stageName}».\n\n` +
+            `Устройства: ${serialsStr}\n\n` +
+            `После удаления следующий этап для них: «${nextName}».\n\n` +
+            `Продолжить?`
+        );
+        if (!ok) return;
+    } else {
+        if (!confirm(`Убрать «${stageName}» из маршрута?`)) return;
+    }
+
+    prCurrent.stages = stages.filter(s => s.stage_key !== key);
+    renderPrEditor({ ...prCurrent._lastData, stages: prCurrent.stages });
+}
+
+// ─── Project Route DnD ───────────────────────────────────────────────
+var _prDragSrcKey = null;
+
+function initPrDragDrop() {
+    const list = document.getElementById('prStagesList');
+    if (!list) return;
+    list.addEventListener('dragstart', (e) => {
+        const row = e.target.closest('.stage-row');
+        if (!row) return;
+        _prDragSrcKey = row.dataset.key;
+        e.dataTransfer.effectAllowed = 'move';
+        setTimeout(() => row.classList.add('dragging'), 0);
+    });
+    list.addEventListener('dragend', () => {
+        list.querySelectorAll('.stage-row').forEach(r => r.classList.remove('dragging', 'drag-over'));
+    });
+    list.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        const row = e.target.closest('.stage-row');
+        if (!row || row.dataset.key === _prDragSrcKey) return;
+        list.querySelectorAll('.stage-row').forEach(r => r.classList.remove('drag-over'));
+        row.classList.add('drag-over');
+    });
+    list.addEventListener('dragleave', (e) => {
+        if (!list.contains(e.relatedTarget))
+            list.querySelectorAll('.stage-row').forEach(r => r.classList.remove('drag-over'));
+    });
+    list.addEventListener('drop', (e) => {
+        e.preventDefault();
+        const targetRow = e.target.closest('.stage-row');
+        if (!targetRow || !_prDragSrcKey || targetRow.dataset.key === _prDragSrcKey) return;
+        const srcIdx = prCurrent.stages.findIndex(s => s.stage_key === _prDragSrcKey);
+        const tgtIdx = prCurrent.stages.findIndex(s => s.stage_key === targetRow.dataset.key);
+        if (srcIdx === -1 || tgtIdx === -1) return;
+        const [moved] = prCurrent.stages.splice(srcIdx, 1);
+        prCurrent.stages.splice(tgtIdx, 0, moved);
+        _prDragSrcKey = null;
+        renderPrEditor({ ...prCurrent._lastData, stages: prCurrent.stages });
+    });
+}
+
+// ── WS: авто-обновление при изменении маршрутов ──────────────────────────────
+let _rcRefreshTimer = null;
+window.addEventListener('ws:route_saved', () => {
+    clearTimeout(_rcRefreshTimer);
+    _rcRefreshTimer = setTimeout(loadConfigs, 800);
+});
+window.addEventListener('ws:project_route_saved', () => {
+    if (document.getElementById('tabProjects-panel')?.style.display !== 'none') {
+        clearTimeout(_rcRefreshTimer);
+        _rcRefreshTimer = setTimeout(loadPrProjects, 800);
+    }
+});
+
+// ── Инициализация (после всех деклараций) ────────────────────────────────────
+loadConfigs();
+
+// Авто-переключение вкладки по URL-параметру (?tab=projects)
+// Помещено ПОСЛЕ всех деклараций чтобы избежать TDZ
+if (new URLSearchParams(window.location.search).get('tab') === 'projects') {
+    switchTab('projects');
 }
 </script>
 {% endblock %}
