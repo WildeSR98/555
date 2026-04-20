@@ -537,6 +537,7 @@ class WorkLog(Base):
         'REASSIGNED': 'Передан другому',
         'KEPT': 'Оставлен у работника',
         'CANCEL_ACTION': 'Отмена операции',
+        'ROUTE_CHANGE': 'Смена маршрута',
     }
 
     ACTION_COLORS = {
@@ -549,6 +550,7 @@ class WorkLog(Base):
         'REASSIGNED': '#8b5cf6',
         'KEPT': '#6b7280',
         'CANCEL_ACTION': '#dc3545',
+        'ROUTE_CHANGE': '#6366f1',
     }
 
     @property

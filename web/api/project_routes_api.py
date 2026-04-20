@@ -19,9 +19,11 @@ from src.database import get_db
 from src.models import (
     Project, Device, DeviceModel, DeviceCategory,
     RouteConfig, RouteConfigStage, ProjectRouteStage,
+    WorkLog, Workplace, User,
     ROUTE_PIPELINE_STAGES,
 )
 from web.ws_manager import manager as ws_manager
+from web.dependencies import get_current_user
 
 router = APIRouter()
 
@@ -57,6 +59,121 @@ _STAGE_STATUSES: dict[str, list[str]] = {
     'ACCOUNTING':       ['WAITING_ACCOUNTING', 'ACCOUNTING'],
     'WAREHOUSE':        ['WAITING_WAREHOUSE', 'WAREHOUSE'],
 }
+
+# Порядок этапов конвейера (route stage_key)
+_PIPELINE_ORDER = [
+    'KITTING', 'ASSEMBLY', 'VIBROSTAND',
+    'TECH_CONTROL_1_1', 'TECH_CONTROL_1_2',
+    'FUNC_CONTROL',
+    'TECH_CONTROL_2_1', 'TECH_CONTROL_2_2',
+    'PACKING', 'ACCOUNTING', 'WAREHOUSE',
+]
+
+# Device.status (ожидание / в работе) → базовый route stage_key
+_DEVICE_STATUS_TO_ROUTE_KEY: dict[str, str] = {
+    'WAITING_KITTING':           'KITTING',
+    'WAITING_PRE_PRODUCTION':    'KITTING',
+    'PRE_PRODUCTION':            'KITTING',
+    'WAITING_ASSEMBLY':          'ASSEMBLY',
+    'ASSEMBLY':                  'ASSEMBLY',
+    'WAITING_VIBROSTAND':        'VIBROSTAND',
+    'VIBROSTAND':                'VIBROSTAND',
+    'WAITING_TECH_CONTROL_1_1':  'TECH_CONTROL_1_1',
+    'TECH_CONTROL_1_1':          'TECH_CONTROL_1_1',
+    'WAITING_TECH_CONTROL_1_2':  'TECH_CONTROL_1_2',
+    'TECH_CONTROL_1_2':          'TECH_CONTROL_1_2',
+    'WAITING_FUNC_CONTROL':      'FUNC_CONTROL',
+    'FUNC_CONTROL':              'FUNC_CONTROL',
+    'WAITING_TECH_CONTROL_2_1':  'TECH_CONTROL_2_1',
+    'TECH_CONTROL_2_1':          'TECH_CONTROL_2_1',
+    'WAITING_TECH_CONTROL_2_2':  'TECH_CONTROL_2_2',
+    'TECH_CONTROL_2_2':          'TECH_CONTROL_2_2',
+    'WAITING_PACKING':           'PACKING',
+    'PACKING':                   'PACKING',
+    'WAITING_ACCOUNTING':        'ACCOUNTING',
+    'ACCOUNTING':                'ACCOUNTING',
+    'WAITING_WAREHOUSE':         'WAREHOUSE',
+    'WAREHOUSE':                 'WAREHOUSE',
+}
+
+
+def _advance_stranded_devices(
+    project_id: int,
+    device_type: str,
+    enabled_keys: set,
+    db: Session,
+    worker_id: Optional[int] = None,
+) -> list:
+    """
+    Проверяет устройства в проекте после изменения маршрута:
+    если устройство ожидает этап, которого больше нет в маршруте → переводится
+    на следующий активный этап автоматически.
+    Создаёт запись в истории WorkLog для каждого изменения.
+    Возвращает список изменений для отображения в UI.
+    """
+    devices = (
+        db.query(Device)
+        .filter(Device.project_id == project_id, Device.device_type == device_type)
+        .all()
+    )
+
+    # Ищем любое активное рабочее место для WorkLog (FK обязательно)
+    fallback_wp = db.query(Workplace).filter_by(is_active=True).order_by(Workplace.order).first()
+    fallback_wp_id = fallback_wp.id if fallback_wp else None
+
+    # Если не передан worker_id — берём первого админа/ROOT
+    if not worker_id:
+        su = db.query(User).filter(User.role.in_(['ROOT', 'ADMIN'])).order_by(User.id).first()
+        worker_id = su.id if su else None
+
+    advanced = []
+    for device in devices:
+        route_key = _DEVICE_STATUS_TO_ROUTE_KEY.get(device.status)
+        if route_key is None:
+            continue  # статус не связан с этапами маршрута
+
+        if route_key in enabled_keys:
+            continue  # этап всё ещё есть в маршруте — всё ок
+
+        # Этап удалён — ищем следующий активный
+        try:
+            idx = _PIPELINE_ORDER.index(route_key)
+        except ValueError:
+            continue
+
+        next_key = next(
+            (k for k in _PIPELINE_ORDER[idx + 1:] if k in enabled_keys),
+            None
+        )
+
+        old_status = device.status
+        device.status = f'WAITING_{next_key}' if next_key else 'QC_PASSED'
+        device.updated_at = datetime.now()
+
+        # Запись в истории производственных действий
+        if worker_id and fallback_wp_id:
+            db.add(WorkLog(
+                worker_id=worker_id,
+                session_id=None,
+                workplace_id=fallback_wp_id,
+                device_id=device.id,
+                project_id=project_id,
+                action='ROUTE_CHANGE',
+                old_status=old_status,
+                new_status=device.status,
+                serial_number=device.serial_number or '',
+                notes=f'Автоматический перевод: этап «{route_key}» удалён из маршрута проекта',
+                created_at=datetime.now(),
+            ))
+
+        advanced.append({
+            'serial':    device.serial_number or f'#{device.id}',
+            'from':      old_status,
+            'to':        device.status,
+            'next_stage': next_key or 'завершено',
+        })
+
+    return advanced
 
 
 def _get_global_stages(device_type: str, db: Session) -> list:
@@ -191,6 +308,7 @@ async def save_project_device_route(
     device_type: str,
     body: SaveProjectRouteBody,
     db:  Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Сохранить индивидуальный маршрут для проекта + тип устройства."""
     project = db.query(Project).get(project_id)
@@ -203,6 +321,12 @@ async def save_project_device_route(
     ).delete()
 
     # Создаём новые
+    # Новый набор активных stage_key (базовые, без ::N) — для проверки зависших устройств
+    enabled_base_keys = {
+        (s.stage_key.split('::')[0] if '::' in s.stage_key else s.stage_key)
+        for s in body.stages if s.is_enabled
+    }
+
     for s in body.stages:
         db.add(ProjectRouteStage(
             project_id=project_id,
@@ -213,6 +337,12 @@ async def save_project_device_route(
             label=s.label or None,  # save for any stage (renames, ::N auto-labels)
         ))
 
+    # Автоматически переводим устройства, ожидающие удалённые этапы, записываем в историю
+    advanced = _advance_stranded_devices(
+        project_id, device_type, enabled_base_keys, db,
+        worker_id=current_user.id,
+    )
+
     db.commit()
     await ws_manager.broadcast({
         "type":         "project_route_saved",
@@ -220,7 +350,17 @@ async def save_project_device_route(
         "project_name": project.name,
         "device_type":  device_type,
     })
-    return {"ok": True, "message": "Маршрут проекта сохранён"}
+    response = {
+        "ok":      True,
+        "message": "Маршрут проекта сохранён",
+    }
+    if advanced:
+        response["advanced_devices"] = advanced
+        response["advanced_count"]  = len(advanced)
+        response["warning"] = (
+            f"{len(advanced)} устройств автоматически переведены на следующий доступный этап"
+        )
+    return response
 
 
 @router.delete("/{project_id}/device/{device_type}")

@@ -15,7 +15,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from src.database import get_db
-from src.models import Workplace, WorkSession, WorkLog, Device, User, Project, ProjectRoute
+from src.models import Workplace, WorkSession, WorkLog, Device, User, Project, ProjectRoute, ProjectRouteStage, RouteConfig
 from src.logic.workflow import WorkflowEngine
 from src.system_config import get_route_bypass_roles, get_cooldown_bypass_roles
 from web.dependencies import get_current_user
@@ -301,9 +301,25 @@ async def do_action(
                         return {"ok": False, "error": f"{device.serial_number}: Недопустимый целевой статус после ремонта."}
                     new_status = data.target_status
                 else:
-                    # Ищем маршрут проекта и рассчитываем непропущенный статус
-                    pr = db.query(ProjectRoute).filter_by(project_id=device.project_id).first()
-                    enabled = pr.route_config.get_enabled_stages() if pr and pr.route_config else []
+                    # Получаем активные этапы из проектного маршрута (ProjectRouteStage),
+                    # если нет — из глобального RouteConfig
+                    overrides = (
+                        db.query(ProjectRouteStage)
+                        .filter_by(project_id=device.project_id, device_type=device.device_type)
+                        .order_by(ProjectRouteStage.order_index)
+                        .all()
+                    )
+                    if overrides:
+                        enabled = [
+                            (s.stage_key.split('::')[0] if '::' in s.stage_key else s.stage_key)
+                            for s in overrides if s.is_enabled
+                        ]
+                    else:
+                        rc = (
+                            db.query(RouteConfig).filter_by(device_type=device.device_type).first()
+                            or db.query(RouteConfig).filter_by(is_default=True).first()
+                        )
+                        enabled = rc.get_enabled_stages() if rc else []
                     new_status = resolve_next_status(old_status, enabled)
                 
                 # Проверка Workflow
