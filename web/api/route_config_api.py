@@ -43,7 +43,7 @@ def _serialize(rc: RouteConfig) -> dict:
                 "stage_key":   s.stage_key,
                 "order_index": s.order_index,
                 "is_enabled":  s.is_enabled,
-                "label":       next(
+                "label":       s.label or next(
                     (lbl for k, lbl, _ in ROUTE_PIPELINE_STAGES if k == s.stage_key),
                     s.stage_key[8:] if s.stage_key.startswith('CUSTOM::') else s.stage_key
                 ),
@@ -61,6 +61,7 @@ class StageInput(BaseModel):
     stage_key: str
     is_enabled: bool
     order_index: Optional[int] = None  # позиция после drag-and-drop
+    label: Optional[str] = None        # кастомный ярлык (напр. «Комплектовка-доукомплектование»)
 
 
 class RouteConfigCreate(BaseModel):
@@ -186,6 +187,7 @@ async def update_route_config(
                 stage_key=s.stage_key,
                 order_index=order_idx,
                 is_enabled=s.is_enabled,
+                label=s.label or None,
             ))
 
     db.commit()
