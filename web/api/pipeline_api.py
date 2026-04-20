@@ -3,20 +3,22 @@ API эндпоинты для Pipeline.
 """
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 
 from src.database import get_db
-from src.models import Device
+from src.models import Device, Project
 
 router = APIRouter()
 
 
 @router.get("/counts")
 def get_pipeline_counts(db: Session = Depends(get_db)):
-    """Количество устройств по каждому статусу."""
+    """Количество устройств по каждому статусу (без архивных проектов)."""
     counts = dict(
         db.query(Device.status, func.count(Device.id))
+        .join(Project, Device.project_id == Project.id)
+        .filter(Project.status != 'ARCHIVED')
         .group_by(Device.status).all()
     )
     return counts
@@ -27,13 +29,13 @@ def get_pipeline_devices(
     status: str = Query(...),
     db: Session = Depends(get_db)
 ):
-    """Устройства на конкретном этапе конвейера."""
-    from sqlalchemy.orm import joinedload
+    """Устройства на конкретном этапе конвейера (без архивных проектов)."""
     devices = db.query(Device).options(
         joinedload(Device.project),
         joinedload(Device.current_worker)
-    ).filter(
-        Device.status == status
+    ).join(Project, Device.project_id == Project.id).filter(
+        Device.status == status,
+        Project.status != 'ARCHIVED'
     ).order_by(Device.name).limit(100).all()
 
     return [

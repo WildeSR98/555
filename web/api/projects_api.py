@@ -18,6 +18,56 @@ from web.ws_manager import manager as ws_manager
 router = APIRouter()
 
 
+# ── Pipeline position helpers ─────────────────────────────────────────────────
+
+# Position 0 = start of kitting; 11 = done (QC_PASSED/SHIPPED)
+# done_at_stage_N = devices with pos > N
+_STATUS_PIPELINE_POS: dict[str, int] = {
+    'WAITING_KITTING': 0, 'WAITING_PRE_PRODUCTION': 0, 'PRE_PRODUCTION': 0,
+    'WAITING_ASSEMBLY': 1, 'ASSEMBLY': 1,
+    'WAITING_VIBROSTAND': 2, 'VIBROSTAND': 2,
+    'WAITING_TECH_CONTROL_1_1': 3, 'TECH_CONTROL_1_1': 3,
+    'WAITING_TECH_CONTROL_1_2': 4, 'TECH_CONTROL_1_2': 4,
+    'WAITING_FUNC_CONTROL': 5, 'FUNC_CONTROL': 5,
+    'WAITING_TECH_CONTROL_2_1': 6, 'TECH_CONTROL_2_1': 6,
+    'WAITING_TECH_CONTROL_2_2': 7, 'TECH_CONTROL_2_2': 7,
+    'WAITING_PACKING': 8, 'PACKING': 8,
+    'WAITING_ACCOUNTING': 9, 'ACCOUNTING': 9,
+    'WAITING_WAREHOUSE': 10, 'WAREHOUSE': 10,
+    'QC_PASSED': 11, 'SHIPPED': 11,
+}
+_STAGE_DEFS = [
+    (0, 'Компл.'), (1, 'Сборка'), (2, 'Вибро'),
+    (3, 'ОТК1.1'),   (4, 'ОТК1.2'), (5, 'Функц.'),
+    (6, 'ОТК2.1'),   (7, 'ОТК2.2'), (8, 'Упак.'),
+    (9, 'Учёт'),     (10, 'Склад'),
+]
+
+
+def _compute_project_stats(devices: list) -> dict:
+    """Вычисляет completion_pct, stage_stats, total, total_done."""
+    total = len(devices)
+    if total == 0:
+        return {'total': 0, 'total_done': 0, 'completion_pct': 0, 'stage_stats': []}
+    positions = [_STATUS_PIPELINE_POS.get(d.status, 0) for d in devices]
+    max_pos = max(positions)
+    total_done = sum(1 for p in positions if p >= 11)
+    completion_pct = round(total_done / total * 100)
+    stage_stats = [
+        {'idx': idx, 'short': short,
+         'done': sum(1 for pos in positions if pos > idx),
+         'total': total}
+        for idx, short in _STAGE_DEFS
+        if idx <= max_pos  # показываем только те этапы, которых достиг хоть один устрой
+    ]
+    return {
+        'total': total,
+        'total_done': total_done,
+        'completion_pct': completion_pct,
+        'stage_stats': stage_stats,
+    }
+
+
 class DeviceRowInput(BaseModel):
     part_number: str
     model_id: int
@@ -42,8 +92,15 @@ class DeleteProjectRequest(BaseModel):
 def get_projects_tree(status: Optional[str] = None, db: Session = Depends(get_db)):
     """Получить дерево проектов -> устройств -> операций (Оптимизировано)."""
     query = db.query(Project)
-    if status:
+    if status == 'ARCHIVED':
+        # Вкладка Архив — показываем только архивные
+        query = query.filter(Project.status == 'ARCHIVED')
+    elif status:
+        # Конкретный статус (не ARCHIVED) — фильтруем
         query = query.filter(Project.status == status)
+    else:
+        # По умолчанию — скрываем архивные (они на отдельной вкладке)
+        query = query.filter(Project.status != 'ARCHIVED')
     
     # Используем selectinload для одного дополнительного запроса на каждый уровень вложенности вместо N+1
     projects = query.options(
@@ -52,6 +109,7 @@ def get_projects_tree(status: Optional[str] = None, db: Session = Depends(get_db
     
     tree = []
     for p in projects:
+        ps = _compute_project_stats(p.devices)
         p_node = {
             "id": p.id,
             "type": "project",
@@ -60,6 +118,10 @@ def get_projects_tree(status: Optional[str] = None, db: Session = Depends(get_db
             "status": p.status,
             "status_display": p.status_display,
             "badge_color": Project.STATUS_COLORS.get(p.status, '#6c757d'),
+            "completion_pct": ps['completion_pct'],
+            "total": ps['total'],
+            "total_done": ps['total_done'],
+            "stage_stats": ps['stage_stats'],
             "children": []
         }
         
@@ -105,24 +167,26 @@ def get_entity_details(entity_type: str, entity_id: int, db: Session = Depends(g
         
         # Считаем статистику (теперь через len(project.devices), так как это список)
         devices_list = project.devices
-        total = len(devices_list)
-        
-        done = sum(1 for d in devices_list if d.status in (['QC_PASSED', 'SHIPPED']))
-        not_started = sum(1 for d in devices_list if d.status in (['PLANNING', 'WAITING_KITTING']))
-        in_work = total - done - not_started
-        
+        ps = _compute_project_stats(devices_list)
         return {
             "title": f"📁 Проект: {project.name}",
-            "stats": {"total": total, "done": done, "not_started": not_started, "in_work": in_work},
+            "stats": {
+                "total":          ps['total'],
+                "done":           ps['total_done'],
+                "not_started":    sum(1 for d in devices_list if d.status in ('PLANNING', 'WAITING_KITTING')),
+                "in_work":        ps['total'] - ps['total_done'],
+                "completion_pct": ps['completion_pct'],
+                "stage_stats":    ps['stage_stats'],
+            },
             "fields": [
-                {"label": "Код", "value": project.code},
-                {"label": "Название", "value": project.name},
-                {"label": "Статус", "value": project.status_display},
-                {"label": "Спецификация", "value": project.spec_link or "—"},
+                {"label": "Код",            "value": project.code},
+                {"label": "Название",       "value": project.name},
+                {"label": "Статус",         "value": project.status_display},
+                {"label": "Спецификация",   "value": project.spec_link or "—"},
                 {"label": "Код подтверждения", "value": project.spec_code or "—"},
-                {"label": "Менеджер", "value": project.manager.full_name if project.manager else "—"},
-                {"label": "Создан", "value": project.created_at.strftime('%d.%m.%Y %H:%M') if project.created_at else "—"},
-                {"label": "Устройств", "value": total},
+                {"label": "Менеджер",       "value": project.manager.full_name if project.manager else "—"},
+                {"label": "Создан",         "value": project.created_at.strftime('%d.%m.%Y %H:%M') if project.created_at else "—"},
+                {"label": "Устройств",      "value": ps['total']},
             ]
         }
         
@@ -133,6 +197,7 @@ def get_entity_details(entity_type: str, entity_id: int, db: Session = Depends(g
             
         return {
             "title": f"💻 Устройство: {device.name}",
+            "serial_number": device.serial_number,  # для кнопки «Перейти к сканированию»
             "fields": [
                 {"label": "Код", "value": device.code or "—"},
                 {"label": "Название", "value": device.name},

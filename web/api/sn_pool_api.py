@@ -10,8 +10,9 @@ from typing import List
 from datetime import datetime
 
 from src.database import get_db
-from src.models import Device, DeviceModel, SerialNumber, DeviceCategory
+from src.models import Device, DeviceModel, SerialNumber, DeviceCategory, User
 from web.ws_manager import manager as ws_manager
+from web.dependencies import get_current_user
 
 router = APIRouter()
 
@@ -34,6 +35,9 @@ class CategoryCreateInput(BaseModel):
 class CategoryUpdateInput(BaseModel):
     display_name: str
     sn_prefix: str
+
+class DeleteModelRequest(BaseModel):
+    password: str
 
 
 @router.patch("/models/{model_id}")
@@ -201,3 +205,38 @@ def set_counter(model_id: int, data: CounterSetInput, db: Session = Depends(get_
     db.add(new_sn)
     db.commit()
     return {"ok": True, "message": f"Счетчик установлен. Следующий сгенерированный будет > {new_sn_str}"}
+
+
+@router.delete("/models/{model_id}")
+def delete_model(
+    model_id: int,
+    data: DeleteModelRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Удалить модель устройства. Требует пароль админа."""
+    # 1. Проверка прав и пароля
+    if current_user.role not in ('ADMIN', 'ROOT'):
+        raise HTTPException(403, "Недостаточно прав")
+    if not current_user.check_password(data.password):
+        raise HTTPException(403, "Неверный пароль администратора")
+
+    # 2. Получаем модель
+    model = db.query(DeviceModel).get(model_id)
+    if not model:
+        raise HTTPException(404, "Модель не найдена")
+
+    # 3. Проверяем: есть ли использованные SN (привязанные к устройствам)
+    used_count = db.query(SerialNumber).filter_by(model_id=model_id, is_used=True).count()
+    if used_count > 0:
+        raise HTTPException(
+            400,
+            f"Нельзя удалить: {used_count} серийных номеров этой модели использованы в процессе производства"
+        )
+
+    # 4. Удаляем неиспользованные SN (якорь) и саму модель
+    db.query(SerialNumber).filter_by(model_id=model_id).delete(synchronize_session=False)
+    model_name = model.name
+    db.delete(model)
+    db.commit()
+    return {"ok": True, "message": f"Модель «{model_name}» удалена"}

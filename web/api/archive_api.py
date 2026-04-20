@@ -6,12 +6,18 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 from typing import Optional
+from pydantic import BaseModel
 
 from src.database import get_db
 from src.models import Project, Device, WorkLog, User, ProjectRoute
 from web.dependencies import get_current_user
 
 router = APIRouter()
+
+
+class ArchiveRequest(BaseModel):
+    force: bool = False
+    password: Optional[str] = None
 
 ARCHIVE_HOLD_DAYS = 30   # минимум дней после завершения
 
@@ -127,10 +133,14 @@ def check_eligibility(project_id: int, db: Session = Depends(get_db)):
 @router.post("/projects/{project_id}")
 def archive_project(
     project_id: int,
+    data: ArchiveRequest = ArchiveRequest(),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user)
 ):
-    """Архивировать проект (ручной режим, с проверкой условий)."""
+    """Архивировать проект.
+    - force=False: авто-режим — проверяет 30-дневный период.
+    - force=True:  ручной override — пропускает 30 дней, но всё равно требует пароль ADMIN.
+    """
     if user.role not in ('ADMIN', 'ROOT', 'MANAGER'):
         raise HTTPException(403, "Недостаточно прав")
 
@@ -139,17 +149,35 @@ def archive_project(
         raise HTTPException(404, "Проект не найден")
 
     elig = _archive_eligibility(project, db)
+
     if not elig["eligible"]:
         reason = elig.get("reason")
         days_left = elig.get("days_left")
+
         if reason == "already_archived":
             raise HTTPException(400, "Проект уже в архиве")
         if reason == "not_completed":
             raise HTTPException(400, "Не все устройства завершены (QC_PASSED)")
         if reason == "hold_period":
-            raise HTTPException(400, f"Архивирование доступно через {days_left} дн. В архив можно только через 30 дней после завершения.")
+            if not data.force:
+                # Возвращаем структурированную ошибку, чтобы UI мог её обработать
+                raise HTTPException(
+                    400,
+                    detail={
+                        "reason": "hold_period",
+                        "days_left": days_left,
+                        "message": f"Архива доступна через {days_left} дней. Можно архивировать вручную с паролем администратора."
+                    }
+                )
+            # force=True: проверяем права и пароль
+            if user.role not in ('ADMIN', 'ROOT'):
+                raise HTTPException(403, "Принудительная архивация доступна только администратору")
+            if not data.password or not user.check_password(data.password):
+                raise HTTPException(403, "Неверный пароль администратора")
+            # OK: force override
 
     project.status = 'ARCHIVED'
     project.updated_at = datetime.now()
     db.commit()
-    return {"ok": True, "message": f"Проект «{project.name}» перемещён в архив"}
+    forced_tag = " (принудительно)" if data.force else ""
+    return {"ok": True, "message": f"Проект «{project.name}» перемещён в архив{forced_tag}"}

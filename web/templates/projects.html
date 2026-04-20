@@ -3,23 +3,24 @@
 {% block title %}Проекты — Production Manager{% endblock %}
 
 {% block content %}
-<div class="page-header" style="display:flex; justify-content:space-between; align-items:center;">
+<div class="page-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
     <div>
         <h2>📋 Проекты</h2>
         <p class="text-muted">Дерево проектов, устройств и операций</p>
     </div>
-    <div style="display:flex; gap:10px;">
-        <input type="text" id="searchInput" placeholder="🔍 Поиск по коду, имени..." class="input-large" style="width:250px;" oninput="filterTree()">
-        <select id="statusFilter" class="input-large" onchange="loadTree()">
-            <option value="">Все статусы</option>
-            {% for code, name in status_choices.items() %}
-            <option value="{{ code }}">{{ name }}</option>
-            {% endfor %}
-        </select>
+    <div style="display:flex; gap:10px; align-items:center;">
+        <div style="display:flex; background:var(--card-bg); border:1px solid var(--border); border-radius:8px; overflow:hidden;">
+            <button id="tabActive" onclick="switchTab('active')"
+                style="padding:7px 18px; border:none; cursor:pointer; font-weight:600; transition:.2s;
+                       background:rgba(99,102,241,.15); color:#6366f1;">📋 Активные</button>
+            <button id="tabArchive" onclick="switchTab('archive')"
+                style="padding:7px 18px; border:none; cursor:pointer; font-weight:600; transition:.2s;
+                       background:transparent; color:var(--text-muted);">📦 Архив</button>
+        </div>
+        <input type="text" id="searchInput" placeholder="🔍 Поиск по коду, имени..." class="input-large" style="width:220px;" oninput="filterTree()">
         <button class="btn btn-primary" onclick="loadTree()">&#x27F3; Обновить</button>
         <a href="/route-configs" class="btn" style="background:rgba(99,102,241,.15); color:#6366f1; border:1px solid rgba(99,102,241,.3);">📋 Маршрутный лист</a>
-        <a href="/archive" class="btn" style="background:rgba(99,102,241,.08); color:var(--text-muted); border:1px solid var(--border);">📦 Архив</a>
-        <button class="btn btn-success" onclick="openCreateModal()">➕ Создать</button>
+        <button id="btnCreate" class="btn btn-success" onclick="openCreateModal()">➕ Создать</button>
     </div>
 </div>
 
@@ -44,22 +45,25 @@
 
     <!-- Детали -->
     <div class="card" style="overflow-y:auto;" id="detailsPanel">
+        <!-- Кнопка Маршрутные листы (сверху) -->
+        <button id="btnRouteSheets" class="btn" style="display:none; width:100%; margin-bottom:14px;
+                background:rgba(99,102,241,.12); color:#6366f1; border:1px solid rgba(99,102,241,.3);"
+                onclick="openProjectRoutes()">
+            📋 Маршрутные листы
+        </button>
+
         <h3 id="detailsTitle" style="word-wrap: break-word;">Выберите элемент</h3>
-        
-        <!-- Статистика проекта -->
-        <div id="projectStats" style="display:none; gap:10px; margin-bottom: 20px;">
-            <div class="stat-mini" style="border:1px solid var(--border); padding:10px; border-radius:8px; flex:1;">
-                <div style="font-size:10px; font-weight:bold; color:var(--text-muted);">⚪ ОЖИД.</div>
-                <div style="font-size:18px; font-weight:bold;" id="statNotStarted">0</div>
+
+        <!-- Общая готовность проекта -->
+        <div id="projectStats" style="display:none; margin-bottom:16px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                <span style="font-size:13px; color:var(--text-muted);">&#x1F4CA; Готовность</span>
+                <span id="statPctLabel" style="font-size:18px; font-weight:800; color:#22c55e;">0%</span>
             </div>
-            <div class="stat-mini" style="border:1px solid var(--border); padding:10px; border-radius:8px; flex:1;">
-                <div style="font-size:10px; font-weight:bold; color:#3b82f6;">🟡 РАБОТ.</div>
-                <div style="font-size:18px; font-weight:bold;" id="statInWork">0</div>
+            <div style="background:var(--border); border-radius:8px; height:8px; overflow:hidden; margin-bottom:10px;">
+                <div id="statPctBar" style="height:100%; border-radius:8px; background:linear-gradient(90deg,#6366f1,#22c55e); width:0%; transition:width .5s ease;"></div>
             </div>
-            <div class="stat-mini" style="border:1px solid var(--border); padding:10px; border-radius:8px; flex:1;">
-                <div style="font-size:10px; font-weight:bold; color:var(--success);">🟢 ГОТОВ.</div>
-                <div style="font-size:18px; font-weight:bold;" id="statDone">0</div>
-            </div>
+            <div id="stageChips" style="display:flex; flex-wrap:wrap; gap:5px;"></div>
         </div>
 
         <table class="table" id="detailsTable" style="display:none;">
@@ -67,13 +71,20 @@
             <tbody id="detailsBody"></tbody>
         </table>
 
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:20px; flex-wrap:wrap; gap:8px;">
-            <button id="btnRouteSheets" class="btn" style="display:none;
-                    background:rgba(99,102,241,.12); color:#6366f1; border:1px solid rgba(99,102,241,.3);"
-                    onclick="openProjectRoutes()">
-                📋 Маршрутные листы
+        <div style="display:flex; flex-direction:column; gap:8px; margin-top:20px;">
+            <button id="btnGoToScan" class="btn" style="display:none;
+                    background:rgba(34,197,94,.12); color:#22c55e; border:1px solid rgba(34,197,94,.3);"
+                    onclick="goToScan()">
+                🔍 Перейти к сканированию
             </button>
-            <button id="btnDelete" class="btn btn-danger" style="display:none;" onclick="deleteProject()">🗑 Удалить проект</button>
+            <button id="btnDelete" class="btn btn-danger" style="display:none;" onclick="deleteProject()">&#x1F5D1; Удалить проект</button>
+            <button id="btnDeviceHistory" class="btn" style="display:none;
+                    background:rgba(59,130,246,.12); color:#60a5fa; border:1px solid rgba(59,130,246,.3);"
+                    onclick="goToDeviceHistory()">
+                📜 История устройства
+            </button>
+            <button id="btnArchive" class="btn" style="display:none; background:rgba(245,158,11,.1); color:#f59e0b; border:1px solid rgba(245,158,11,.3);"
+                    onclick="archiveProject()">&#x1F4E6; Отправить в архив</button>
         </div>
     </div>
 </div>
@@ -152,6 +163,8 @@
 <script>
 let treeData = [];
 let currentProjectId = null;
+let currentDeviceSN   = null;  // СН выбранного устройства
+let currentTab        = 'active';  // 'active' | 'archive'
 
 const deviceModels = JSON.parse(
     document.getElementById('device-models-data').textContent
@@ -161,10 +174,22 @@ document.addEventListener('DOMContentLoaded', () => {
     loadTree();
 });
 
+function switchTab(tab) {
+    currentTab = tab;
+    const isArchive = tab === 'archive';
+    document.getElementById('tabActive').style.background  = !isArchive ? 'rgba(99,102,241,.15)' : 'transparent';
+    document.getElementById('tabActive').style.color       = !isArchive ? '#6366f1'              : 'var(--text-muted)';
+    document.getElementById('tabArchive').style.background = isArchive  ? 'rgba(245,158,11,.15)' : 'transparent';
+    document.getElementById('tabArchive').style.color      = isArchive  ? '#f59e0b'              : 'var(--text-muted)';
+    document.getElementById('btnCreate').style.display = isArchive ? 'none' : '';
+    _clearDetailsPanel();
+    loadTree();
+}
+
 async function loadTree() {
-    const status = document.getElementById('statusFilter').value;
+    const param = currentTab === 'archive' ? '?status=ARCHIVED' : '';
     try {
-        const resp = await fetch(`/api/projects/tree?status=${status}`);
+        const resp = await fetch(`/api/projects/tree${param}`);
         treeData = await resp.json();
         renderTree();
     } catch (e) {
@@ -221,19 +246,42 @@ function renderTree(filterText = '') {
             const tr = document.createElement('tr');
             tr.className = 'tree-row';
             tr.style.fontWeight = 'bold';
-            const isExpanded = !!ft; // Auto-expand if searching
-            
+            const isExpanded = !!ft;
+
+            // Процент в правой колонке
+            const pct = p.completion_pct ?? 0;
+            const pctColor = pct >= 100 ? '#22c55e' : pct > 50 ? '#3b82f6' : '#f59e0b';
+            const pctBadge = `<span style="padding:2px 8px; border-radius:20px; font-size:11px; font-weight:700;
+                background:${pctColor}22; color:${pctColor}; border:1px solid ${pctColor}44;">${pct}%</span>`;
+
             tr.innerHTML = `
                 <td>
-                    <button type="button" class="btn-toggle" onclick="toggleProject(${p.id}, event)" style="background:none; border:none; cursor:pointer; width:20px; font-weight:bold;">${isExpanded ? '▼' : '▶'}</button>
+                    <button type="button" class="btn-toggle" onclick="toggleProject(${p.id}, event)"
+                        style="background:none; border:none; cursor:pointer; width:20px; font-weight:bold;">${isExpanded ? '▼' : '▶'}</button>
                     <span onclick="loadDetails('project', ${p.id})">📁 ${escapeHTML(p.name)}</span>
                 </td>
                 <td onclick="loadDetails('project', ${p.id})">${escapeHTML(p.code || '')}</td>
-                <td onclick="loadDetails('project', ${p.id})"><span class="badge-color" style="background:${escapeHTML(p.badge_color)}">${escapeHTML(p.status_display)}</span></td>
+                <td onclick="loadDetails('project', ${p.id})">${pctBadge}</td>
                 <td onclick="loadDetails('project', ${p.id})"></td>
             `;
+
+            // Строка статистики по постам (раскрывается вместе с детьми)
+            const stageStats = p.stage_stats || [];
+            const chipsHtml = stageStats.map(s => {
+                const isDone = s.done >= s.total;
+                const bg = isDone ? '#22c55e22' : s.done > 0 ? '#3b82f622' : 'var(--border)';
+                const cl = isDone ? '#22c55e' : s.done > 0 ? '#3b82f6' : 'var(--text-muted)';
+                return `<span style="padding:2px 7px; border-radius:10px; font-size:11px; font-weight:600; background:${bg}; color:${cl}; white-space:nowrap;">${escapeHTML(s.short)} ${s.done}\u2215${s.total}</span>`;
+            }).join('');
+            const statsBarHTML = stageStats.length ? `
+                <tr class="tree-row child-of-${p.id}" style="${ft ? '' : 'display:none;'}">
+                    <td colspan="4" style="padding:4px 10px 8px 38px;">
+                        <div style="display:flex; flex-wrap:wrap; gap:4px; padding:2px 0;">${chipsHtml}</div>
+                    </td>
+                </tr>` : '';
+
             tbody.appendChild(tr);
-            tbody.insertAdjacentHTML('beforeend', cHTML);
+            tbody.insertAdjacentHTML('beforeend', statsBarHTML + cHTML);
         }
     });
 }
@@ -259,9 +307,13 @@ function filterTree() {
 async function loadDetails(type, id) {
     if(type === 'project') currentProjectId = id;
     else currentProjectId = null;
-    
+    currentDeviceSN = null;
+
     document.getElementById('btnDelete').style.display      = type === 'project' ? 'inline-block' : 'none';
-    document.getElementById('btnRouteSheets').style.display  = type === 'project' ? 'inline-block' : 'none';
+    document.getElementById('btnArchive').style.display     = type === 'project' ? 'inline-block' : 'none';
+    document.getElementById('btnRouteSheets').style.display  = type === 'project' ? 'block' : 'none';
+    document.getElementById('btnGoToScan').style.display    = 'none';
+    document.getElementById('btnDeviceHistory').style.display = 'none';
     if (type === 'project') document.getElementById('btnRouteSheets').dataset.pid = id;
     
     try {
@@ -277,12 +329,28 @@ async function loadDetails(type, id) {
         
         const pStats = document.getElementById('projectStats');
         if (type === 'project' && data.stats) {
-            document.getElementById('statNotStarted').textContent = data.stats.not_started;
-            document.getElementById('statInWork').textContent = data.stats.in_work;
-            document.getElementById('statDone').textContent = data.stats.done;
-            pStats.style.display = 'flex';
+            const pct = data.stats.completion_pct ?? 0;
+            document.getElementById('statPctLabel').textContent = pct + '%';
+            document.getElementById('statPctBar').style.width = pct + '%';
+            const chipsEl = document.getElementById('stageChips');
+            const stages = data.stats.stage_stats || [];
+            chipsEl.innerHTML = stages.map(s => {
+                const isDone = s.done >= s.total;
+                const hasWork = s.done > 0;
+                const bg = isDone ? 'rgba(34,197,94,.15)' : hasWork ? 'rgba(59,130,246,.12)' : 'var(--border)';
+                const cl = isDone ? '#22c55e'             : hasWork ? '#60a5fa'              : 'var(--text-muted)';
+                return `<span style="padding:3px 9px; border-radius:12px; font-size:12px; font-weight:700; background:${bg}; color:${cl};">${escapeHTML(s.short)} ${s.done}/${s.total}</span>`;
+            }).join('');
+            pStats.style.display = 'block';
         } else {
             pStats.style.display = 'none';
+        }
+
+        // Кнопка прохода на скан и кнопка истории — только для устройств с SN
+        if (type === 'device' && data.serial_number) {
+            currentDeviceSN = data.serial_number;
+            document.getElementById('btnGoToScan').style.display = 'inline-block';
+            document.getElementById('btnDeviceHistory').style.display = 'inline-block';
         }
         
     } catch (e) {
@@ -309,6 +377,8 @@ async function deleteProject() {
             document.getElementById('detailsTable').style.display = 'none';
             document.getElementById('detailsTitle').textContent = 'Выберите элемент';
             document.getElementById('btnDelete').style.display = 'none';
+            document.getElementById('btnArchive').style.display = 'none';
+            document.getElementById('btnRouteSheets').style.display = 'none';
             document.getElementById('projectStats').style.display = 'none';
             loadTree();
         } else {
@@ -326,6 +396,83 @@ function openProjectRoutes() {
         ? `/route-configs?tab=projects&project=${pid}`
         : '/route-configs?tab=projects';
     window.location.href = url;
+}
+
+function goToScan() {
+    if (!currentDeviceSN) return;
+    window.location.href = `/scan?prescan=${encodeURIComponent(currentDeviceSN)}`;
+}
+
+function goToDeviceHistory() {
+    if (!currentDeviceSN) return;
+    window.location.href = `/devices?sn=${encodeURIComponent(currentDeviceSN)}`;
+}
+
+function _clearDetailsPanel() {
+    document.getElementById('detailsTable').style.display    = 'none';
+    document.getElementById('detailsTitle').textContent      = 'Выберите элемент';
+    document.getElementById('btnDelete').style.display       = 'none';
+    document.getElementById('btnArchive').style.display      = 'none';
+    document.getElementById('btnRouteSheets').style.display  = 'none';
+    document.getElementById('projectStats').style.display    = 'none';
+    document.getElementById('btnGoToScan').style.display     = 'none';
+    document.getElementById('btnDeviceHistory').style.display = 'none';
+}
+
+async function archiveProject() {
+    if (!currentProjectId) return;
+    if (!confirm('Отправить проект в архив? (Требуется: все устройства завершены + прошло 30 дней)')) return;
+    try {
+        const resp = await fetch(`/api/archive/projects/${currentProjectId}`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ force: false })
+        });
+        const res = await resp.json();
+        if (resp.ok) {
+            alert(res.message);
+            _clearDetailsPanel();
+            loadTree();
+        } else {
+            // Если не истёк период (но 30 дней) — предлагаем принудительное архивирование
+            const detail = res.detail;
+            if (detail && typeof detail === 'object' && detail.reason === 'hold_period') {
+                document.getElementById('forceArchiveDaysLeft').textContent = detail.days_left;
+                document.getElementById('forceArchivePwd').value = '';
+                document.getElementById('forceArchiveModal').style.display = 'flex';
+                setTimeout(() => document.getElementById('forceArchivePwd').focus(), 100);
+            } else {
+                alert(typeof detail === 'string' ? detail : (detail?.message || 'Ошибка архивирования'));
+            }
+        }
+    } catch(e) {
+        alert('Ошибка сети: ' + e.message);
+    }
+}
+
+async function submitForceArchive(e) {
+    e.preventDefault();
+    const pwd = document.getElementById('forceArchivePwd').value;
+    if (!pwd) return;
+    try {
+        const resp = await fetch(`/api/archive/projects/${currentProjectId}`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ force: true, password: pwd })
+        });
+        const res = await resp.json();
+        if (resp.ok) {
+            document.getElementById('forceArchiveModal').style.display = 'none';
+            alert(res.message);
+            _clearDetailsPanel();
+            loadTree();
+        } else {
+            const msg = typeof res.detail === 'object' ? res.detail?.message : res.detail;
+            alert(msg || 'Ошибка');
+        }
+    } catch(e) {
+        alert('Ошибка сети: ' + e.message);
+    }
 }
 
 // ------ Форма создания ------
@@ -503,4 +650,28 @@ window.addEventListener('ws:device_changed', () => {
 window.addEventListener('ws:project_created', () => { clearTimeout(_treeRefreshTimer); _treeRefreshTimer = setTimeout(loadTree, 800); });
 window.addEventListener('ws:project_deleted', () => { clearTimeout(_treeRefreshTimer); _treeRefreshTimer = setTimeout(loadTree, 800); });
 </script>
+
+<!-- Модалка: Принудительное архивирование -->
+<div id="forceArchiveModal" class="modal-overlay" style="display:none;">
+    <div class="modal-card" style="max-width:440px;">
+        <h3 style="color:#f59e0b;">📦 Архивирование</h3>
+        <p class="text-muted" style="margin-bottom:14px;">
+            Автоматическое архивирование будет доступно через <strong id="forceArchiveDaysLeft">?</strong> дней.<br>
+            Для немедленного архивирования введите пароль администратора.
+        </p>
+        <form onsubmit="submitForceArchive(event)">
+            <div class="form-group">
+                <label>Пароль администратора:</label>
+                <input type="password" id="forceArchivePwd" class="input-large" placeholder="Введите пароль..." required>
+            </div>
+            <div style="display:flex; gap:10px; justify-content:flex-end;">
+                <button type="button" class="btn" onclick="document.getElementById('forceArchiveModal').style.display='none'">Отмена</button>
+                <button type="submit" class="btn" style="background:rgba(245,158,11,.15); color:#f59e0b; border:1px solid rgba(245,158,11,.4);">Архивировать сейчас</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 {% endblock %}
+
+
