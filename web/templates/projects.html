@@ -321,7 +321,11 @@ async function deleteProject() {
 }
 
 function openProjectRoutes() {
-    window.location.href = '/route-configs?tab=projects';
+    const pid = currentProjectId;
+    const url = pid
+        ? `/route-configs?tab=projects&project=${pid}`
+        : '/route-configs?tab=projects';
+    window.location.href = url;
 }
 
 // ------ Форма создания ------

@@ -159,7 +159,11 @@
 <div id="tabProjects-panel" style="display:none;">
 <div class="pr-layout">
     <div class="pr-sidebar">
-        <div style="font-size:12px; color:var(--text-muted); margin-bottom:10px; text-transform:uppercase; letter-spacing:.5px;">Проекты</div>
+        <div style="font-size:12px; color:var(--text-muted); margin-bottom:8px; text-transform:uppercase; letter-spacing:.5px;">Проекты</div>
+        <div style="position:relative; margin-bottom:10px;">
+            <input id="prSearch" type="text" placeholder="Поиск проекта..." oninput="filterPrProjects()" class="form-control"
+                   style="width:100%; font-size:13px; padding:6px 10px; box-sizing:border-box;">
+        </div>
         <div id="prProjectList"><div class="text-muted" style="font-size:13px;">Загрузка...</div></div>
     </div>
     <div class="pr-editor" id="prEditor">
@@ -493,7 +497,9 @@ function switchTab(tab) {
     });
     if (tab === 'projects' && !_prLoaded) {
         _prLoaded = true;
-        loadPrProjects();
+        loadPrProjects();  // openProjectFromUrl() is called inside renderPrProjectList
+    } else if (tab === 'projects' && _prLoaded) {
+        openProjectFromUrl();  // повторный вход на вкладку — тоже раскрываем
     }
 }
 
@@ -535,7 +541,7 @@ function renderPrProjectList() {
         <div class="pr-project" id="prp-${p.id}">
             <div class="pr-project-hdr" onclick="togglePrProject(${p.id})">
                 <span style="font-size:16px;">📁</span>
-                <span style="font-weight:600; font-size:14px;">${escapeHTML(p.name)}</span>
+                <span style="font-weight:600; font-size:14px;" data-pr-name="${escapeHTML(p.name.toLowerCase())}">${escapeHTML(p.name)}</span>
                 ${p.code ? `<code style="font-size:11px; color:var(--text-muted);">${escapeHTML(p.code)}</code>` : ''}
                 <span class="arrow">▶</span>
             </div>
@@ -550,6 +556,33 @@ function renderPrProjectList() {
             </div>
         </div>
     `).join('');
+    filterPrProjects();
+    openProjectFromUrl();
+}
+
+function filterPrProjects() {
+    const q = (document.getElementById('prSearch')?.value || '').toLowerCase().trim();
+    document.querySelectorAll('.pr-project').forEach(el => {
+        const name = (el.querySelector('[data-pr-name]')?.dataset.prName || '').toLowerCase();
+        el.style.display = (!q || name.includes(q)) ? '' : 'none';
+    });
+}
+
+// Авто-раскрыть проект из URL-параметра ?project=ID
+function openProjectFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    const pid = parseInt(params.get('project'));
+    if (!pid) return;
+    const hdr = document.querySelector(`#prp-${pid} .pr-project-hdr`);
+    if (hdr && !hdr.classList.contains('open')) {
+        hdr.classList.add('open');
+        setTimeout(() => hdr.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150);
+    }
+    // Если у проекта один тип — сразу открываем редактор
+    const proj = prProjects.find(p => p.id === pid);
+    if (proj && proj.device_types.length === 1) {
+        loadPrDeviceRoute(pid, proj.device_types[0]);
+    }
 }
 
 function togglePrProject(pid) {
