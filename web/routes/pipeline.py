@@ -52,9 +52,13 @@ def pipeline_page(request: Request, db: Session = Depends(get_db), csrf_protect:
     if not user:
         return RedirectResponse(url="/login")
 
-    # Подсчёт по каждому статусу
+    # Подсчёт по каждому статусу — исключаем устройства из архивных проектов
+    from src.models import Project as ProjectModel
+    from sqlalchemy.orm import join as sa_join
     status_counts = dict(
         db.query(Device.status, func.count(Device.id))
+        .join(ProjectModel, Device.project_id == ProjectModel.id)
+        .filter(ProjectModel.status != 'ARCHIVED')
         .group_by(Device.status).all()
     )
 
