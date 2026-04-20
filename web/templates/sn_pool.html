@@ -229,13 +229,16 @@ async function loadTree() {
                 mli.className = 'tree-mod';
                 mli.dataset.id = m.id;
                 mli.innerHTML = `
-                    <span class="mod-name">📄 ${escapeHTML(m.name)}</span>
+                    <span class="mod-name">&#x1F4C4; ${escapeHTML(m.name)}</span>
                     <button class="edit-btn" title="Переименовать"
-                            onclick="renameModel(${m.id}, '${m.name.replace(/'/g, "\\'").replace(/"/g, '&quot;')}', event)">✏️</button>`;
+                            onclick="renameModel(${m.id}, '${m.name.replace(/'/g, "\\'").replace(/"/g, '&quot;')}', event)">✏️</button>
+                    <button class="edit-btn" title="Удалить модель"
+                            style="color:#ef4444;"
+                            onclick="openDeleteModelModal(${m.id}, '${escapeHTML(m.name).replace(/'/g, "\\'").replace(/"/g, '&quot;')}', event)">🗑️</button>`;
                 if (currentModelId === m.id) mli.classList.add('active');
 
                 mli.addEventListener('click', (e) => {
-                    if (e.target.classList.contains('edit-btn')) return;
+                    if (e.target.classList.contains('edit-btn') || e.target.tagName === 'BUTTON') return;
                     document.querySelectorAll('.tree-mod').forEach(el => el.classList.remove('active'));
                     mli.classList.add('active');
                     loadModelSNs(m.id, m.name);
@@ -470,5 +473,71 @@ async function submitEditCategory(e) {
 window.addEventListener('ws:sn_pool_updated', () => {
     loadTree();
 });
+
+// ─── Удаление модели ──────────────────────────────────────────────────────────
+let _deleteModelId   = null;
+let _deleteModelName = null;
+
+function openDeleteModelModal(id, name, e) {
+    if (e) e.stopPropagation();
+    _deleteModelId   = id;
+    _deleteModelName = name;
+    document.getElementById('deleteModelName').textContent = name;
+    document.getElementById('deleteModelPwd').value = '';
+    document.getElementById('deleteModelModal').style.display = 'flex';
+    setTimeout(() => document.getElementById('deleteModelPwd').focus(), 100);
+}
+
+async function submitDeleteModel(e) {
+    e.preventDefault();
+    const pwd = document.getElementById('deleteModelPwd').value;
+    if (!pwd) return;
+
+    try {
+        const resp = await fetch(`/api/sn-pool/models/${_deleteModelId}`, {
+            method: 'DELETE',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ password: pwd })
+        });
+        const res = await resp.json();
+        if (resp.ok) {
+            closeModal('deleteModelModal');
+            if (currentModelId === _deleteModelId) {
+                currentModelId = null;
+                document.getElementById('tableTitle').textContent = 'Выберите модель устройства...';
+                document.getElementById('tableTitle').style.color = '#94a3b8';
+                document.getElementById('snTable').style.display = 'none';
+                document.getElementById('btnSetCounter').style.display = 'none';
+                document.getElementById('snSearch').style.display = 'none';
+            }
+            loadTree();
+            await fetchCategories();
+        } else {
+            alert(res.detail || 'Ошибка удаления');
+        }
+    } catch(err) { alert('Ошибка сети: ' + err.message); }
+}
 </script>
 {% endblock %}
+
+<!-- Модалка: Удалить модель -->
+<div id="deleteModelModal" class="modal-overlay" style="display:none;">
+    <div class="modal-card" style="max-width:430px;">
+        <h3 style="color:#ef4444;">🗑️ Удалить модель</h3>
+        <p class="text-muted" style="margin-bottom:12px;">
+            Модель: <strong id="deleteModelName"></strong><br>
+            Будут удалены все неиспользованные серийные номера (SN).
+            <span style="color:#ef4444;"> Если есть использованные SN, удаление заблокируется.</span>
+        </p>
+        <form onsubmit="submitDeleteModel(event)">
+            <div class="form-group">
+                <label>Пароль администратора:</label>
+                <input type="password" id="deleteModelPwd" class="input-large" placeholder="Введите пароль..." required>
+            </div>
+            <div style="display:flex; gap:10px; justify-content:flex-end;">
+                <button type="button" class="btn" onclick="closeModal('deleteModelModal')">Отмена</button>
+                <button type="submit" class="btn btn-danger">Удалить</button>
+            </div>
+        </form>
+    </div>
+</div>

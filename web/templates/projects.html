@@ -76,9 +76,14 @@
                     onclick="goToScan()">
                 🔍 Перейти к сканированию
             </button>
-            <button id="btnDelete" class="btn btn-danger" style="display:none;" onclick="deleteProject()">🗑 Удалить проект</button>
+            <button id="btnDelete" class="btn btn-danger" style="display:none;" onclick="deleteProject()">&#x1F5D1; Удалить проект</button>
+            <button id="btnDeviceHistory" class="btn" style="display:none;
+                    background:rgba(59,130,246,.12); color:#60a5fa; border:1px solid rgba(59,130,246,.3);"
+                    onclick="goToDeviceHistory()">
+                📜 История устройства
+            </button>
             <button id="btnArchive" class="btn" style="display:none; background:rgba(245,158,11,.1); color:#f59e0b; border:1px solid rgba(245,158,11,.3);"
-                    onclick="archiveProject()">📦 Отправить в архив</button>
+                    onclick="archiveProject()">&#x1F4E6; Отправить в архив</button>
         </div>
     </div>
 </div>
@@ -293,7 +298,8 @@ async function loadDetails(type, id) {
     document.getElementById('btnDelete').style.display      = type === 'project' ? 'inline-block' : 'none';
     document.getElementById('btnArchive').style.display     = type === 'project' ? 'inline-block' : 'none';
     document.getElementById('btnRouteSheets').style.display  = type === 'project' ? 'block' : 'none';
-    document.getElementById('btnGoToScan').style.display    = 'none';  // скроем по умолчанию
+    document.getElementById('btnGoToScan').style.display    = 'none';
+    document.getElementById('btnDeviceHistory').style.display = 'none';
     if (type === 'project') document.getElementById('btnRouteSheets').dataset.pid = id;
     
     try {
@@ -326,10 +332,11 @@ async function loadDetails(type, id) {
             pStats.style.display = 'none';
         }
 
-        // Кнопка прохода на скан — только для устройств с SN
+        // Кнопка прохода на скан и кнопка истории — только для устройств с SN
         if (type === 'device' && data.serial_number) {
             currentDeviceSN = data.serial_number;
             document.getElementById('btnGoToScan').style.display = 'inline-block';
+            document.getElementById('btnDeviceHistory').style.display = 'inline-block';
         }
         
     } catch (e) {
@@ -380,6 +387,11 @@ function openProjectRoutes() {
 function goToScan() {
     if (!currentDeviceSN) return;
     window.location.href = `/scan?prescan=${encodeURIComponent(currentDeviceSN)}`;
+}
+
+function goToDeviceHistory() {
+    if (!currentDeviceSN) return;
+    window.location.href = `/devices?sn=${encodeURIComponent(currentDeviceSN)}`;
 }
 
 async function archiveProject() {

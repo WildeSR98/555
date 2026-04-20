@@ -126,5 +126,15 @@ async function searchDevice() {
         alert('Ошибка: ' + e.message);
     }
 }
+
+// Авто-поиск по URL-параметру ?sn=
+document.addEventListener('DOMContentLoaded', () => {
+    const sn = new URLSearchParams(window.location.search).get('sn');
+    if (sn) {
+        history.replaceState({}, '', '/devices');  // чистим URL
+        document.getElementById('searchInput').value = sn;
+        searchDevice();
+    }
+});
 </script>
-{% endblock %}
+{% endblock %}
