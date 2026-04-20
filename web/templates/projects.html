@@ -394,23 +394,67 @@ function goToDeviceHistory() {
     window.location.href = `/devices?sn=${encodeURIComponent(currentDeviceSN)}`;
 }
 
+function _clearDetailsPanel() {
+    document.getElementById('detailsTable').style.display    = 'none';
+    document.getElementById('detailsTitle').textContent      = 'Выберите элемент';
+    document.getElementById('btnDelete').style.display       = 'none';
+    document.getElementById('btnArchive').style.display      = 'none';
+    document.getElementById('btnRouteSheets').style.display  = 'none';
+    document.getElementById('projectStats').style.display    = 'none';
+    document.getElementById('btnGoToScan').style.display     = 'none';
+    document.getElementById('btnDeviceHistory').style.display = 'none';
+}
+
 async function archiveProject() {
     if (!currentProjectId) return;
     if (!confirm('Отправить проект в архив? (Требуется: все устройства завершены + прошло 30 дней)')) return;
     try {
-        const resp = await fetch(`/api/archive/projects/${currentProjectId}`, { method: 'POST' });
+        const resp = await fetch(`/api/archive/projects/${currentProjectId}`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ force: false })
+        });
         const res = await resp.json();
         if (resp.ok) {
             alert(res.message);
-            document.getElementById('detailsTable').style.display = 'none';
-            document.getElementById('detailsTitle').textContent = 'Выберите элемент';
-            document.getElementById('btnDelete').style.display      = 'none';
-            document.getElementById('btnArchive').style.display     = 'none';
-            document.getElementById('btnRouteSheets').style.display = 'none';
-            document.getElementById('projectStats').style.display   = 'none';
+            _clearDetailsPanel();
             loadTree();
         } else {
-            alert(res.detail || 'Ошибка архивирования');
+            // Если не истёк период (но 30 дней) — предлагаем принудительное архивирование
+            const detail = res.detail;
+            if (detail && typeof detail === 'object' && detail.reason === 'hold_period') {
+                document.getElementById('forceArchiveDaysLeft').textContent = detail.days_left;
+                document.getElementById('forceArchivePwd').value = '';
+                document.getElementById('forceArchiveModal').style.display = 'flex';
+                setTimeout(() => document.getElementById('forceArchivePwd').focus(), 100);
+            } else {
+                alert(typeof detail === 'string' ? detail : (detail?.message || 'Ошибка архивирования'));
+            }
+        }
+    } catch(e) {
+        alert('Ошибка сети: ' + e.message);
+    }
+}
+
+async function submitForceArchive(e) {
+    e.preventDefault();
+    const pwd = document.getElementById('forceArchivePwd').value;
+    if (!pwd) return;
+    try {
+        const resp = await fetch(`/api/archive/projects/${currentProjectId}`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ force: true, password: pwd })
+        });
+        const res = await resp.json();
+        if (resp.ok) {
+            document.getElementById('forceArchiveModal').style.display = 'none';
+            alert(res.message);
+            _clearDetailsPanel();
+            loadTree();
+        } else {
+            const msg = typeof res.detail === 'object' ? res.detail?.message : res.detail;
+            alert(msg || 'Ошибка');
         }
     } catch(e) {
         alert('Ошибка сети: ' + e.message);
@@ -593,3 +637,24 @@ window.addEventListener('ws:project_created', () => { clearTimeout(_treeRefreshT
 window.addEventListener('ws:project_deleted', () => { clearTimeout(_treeRefreshTimer); _treeRefreshTimer = setTimeout(loadTree, 800); });
 </script>
 {% endblock %}
+
+<!-- Модалка: Принудительное архивирование -->
+<div id="forceArchiveModal" class="modal-overlay" style="display:none;">
+    <div class="modal-card" style="max-width:440px;">
+        <h3 style="color:#f59e0b;">📦 Архивирование</h3>
+        <p class="text-muted" style="margin-bottom:14px;">
+            Автоматическое архивирование будет доступно через <strong id="forceArchiveDaysLeft">?</strong> дней.<br>
+            Для немедленного архивирования введите пароль администратора.
+        </p>
+        <form onsubmit="submitForceArchive(event)">
+            <div class="form-group">
+                <label>Пароль администратора:</label>
+                <input type="password" id="forceArchivePwd" class="input-large" placeholder="Введите пароль..." required>
+            </div>
+            <div style="display:flex; gap:10px; justify-content:flex-end;">
+                <button type="button" class="btn" onclick="document.getElementById('forceArchiveModal').style.display='none'">Отмена</button>
+                <button type="submit" class="btn" style="background:rgba(245,158,11,.15); color:#f59e0b; border:1px solid rgba(245,158,11,.4);">Архивировать сейчас</button>
+            </div>
+        </form>
+    </div>
+</div>
