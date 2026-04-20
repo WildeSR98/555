@@ -178,6 +178,11 @@ let state = {
     lastFeedback: null,
 };
 
+// Флаг: авто-переход после «Принять в работу»
+// true  = устройство остаётся в буфере, сразу появляются кнопки Готово/Брак
+// false = буфер очищается, нужно повторно отсканировать SN (текущее поведение)
+const AUTO_ADVANCE_AFTER_SCAN_IN = false;
+
 const SCAN_STATE_KEY = 'scan_session_state';
 
 function saveState() {
@@ -702,9 +707,23 @@ async function doAction(actionName, notes = '', targetStatus = null) {
             const res = await resp.json();
 
             if (actionName === 'scan_in') {
-                // После SCAN_IN — буфер очищается. Пользователь сканирует заново для Готово/Брак
-                state.devices = [];
-                showFeedback('success', res.message + ' Отсканируйте SN снова для завершения.');
+                if (AUTO_ADVANCE_AFTER_SCAN_IN) {
+                    // Авто-переход: оставляем в буфере, обновляем статусы,
+                    // сразу показываем кнопки Действие (Готово / Брак) — без повторного скана
+                    const statusMap = {};
+                    (res.results || []).forEach(r => { statusMap[r.device_id] = r.new_status; });
+                    state.devices = state.devices.map(d => ({
+                        ...d,
+                        needScanIn: false,
+                        status: statusMap[d.id] || d.status
+                    }));
+                    state.phase = 'action';
+                    showFeedback('success', '📥 Принято в работу. Нажмите «Готово» для завершения.');
+                } else {
+                    // Текущее поведение: буфер очищается, повторное сканирование
+                    state.devices = [];
+                    showFeedback('success', res.message + ' Отсканируйте SN снова для завершения.');
+                }
             } else {
                 // После action (complete/defect/semifinished) — удаляем из буфера
                 state.devices = state.devices.filter(d => !selectedIds.includes(d.id));
