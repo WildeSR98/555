@@ -14,6 +14,7 @@ from src.models import (
     ProjectRoute, ROUTE_PIPELINE_STAGES, User, Project
 )
 from web.dependencies import get_current_user
+from web.ws_manager import manager as ws_manager
 
 router = APIRouter()
 
@@ -154,7 +155,7 @@ def get_route_config(config_id: int, db: Session = Depends(get_db)):
 
 
 @router.put("/{config_id}")
-def update_route_config(
+async def update_route_config(
     config_id: int,
     data: RouteConfigUpdate,
     db: Session = Depends(get_db),
@@ -188,6 +189,11 @@ def update_route_config(
             ))
 
     db.commit()
+    await ws_manager.broadcast({
+        "type":       "route_saved",
+        "id":         rc.id,
+        "route_name": rc.name,
+    })
     return {"ok": True, "message": f"Маршрут «{rc.name}» обновлён"}
 
 

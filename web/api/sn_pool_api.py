@@ -11,6 +11,7 @@ from datetime import datetime
 
 from src.database import get_db
 from src.models import Device, DeviceModel, SerialNumber, DeviceCategory
+from web.ws_manager import manager as ws_manager
 
 router = APIRouter()
 
@@ -36,7 +37,7 @@ class CategoryUpdateInput(BaseModel):
 
 
 @router.patch("/models/{model_id}")
-def update_model(model_id: int, data: ModelUpdateInput, db: Session = Depends(get_db)):
+async def update_model(model_id: int, data: ModelUpdateInput, db: Session = Depends(get_db)):
     """Переименовать модель устройства."""
     model = db.query(DeviceModel).get(model_id)
     if not model:
@@ -50,6 +51,12 @@ def update_model(model_id: int, data: ModelUpdateInput, db: Session = Depends(ge
         raise HTTPException(400, f"Модель «{name}» уже существует в этой категории")
     model.name = name
     db.commit()
+    await ws_manager.broadcast({
+        "type":     "sn_pool_updated",
+        "action":   "model_renamed",
+        "message":  f"Модель переименована: {name}",
+        "category": model.category,
+    })
     return {"ok": True, "message": f"Модель переименована в «{name}»"}
 
 
@@ -86,7 +93,7 @@ def get_categories(db: Session = Depends(get_db)):
 
 
 @router.post("/categories")
-def create_category(data: CategoryCreateInput, db: Session = Depends(get_db)):
+async def create_category(data: CategoryCreateInput, db: Session = Depends(get_db)):
     """Создать новую категорию устройств."""
     code = data.code.strip().upper()
     if not code or not data.display_name.strip():
@@ -100,11 +107,17 @@ def create_category(data: CategoryCreateInput, db: Session = Depends(get_db)):
         sort_order=200,
     ))
     db.commit()
+    await ws_manager.broadcast({
+        "type":    "sn_pool_updated",
+        "action":  "category_created",
+        "message": f"Категория добавлена: {data.display_name}",
+        "code":    code,
+    })
     return {"ok": True, "message": f"Категория «{data.display_name}» (код: {code}) добавлена"}
 
 
 @router.patch("/categories/{code}")
-def update_category(code: str, data: CategoryUpdateInput, db: Session = Depends(get_db)):
+async def update_category(code: str, data: CategoryUpdateInput, db: Session = Depends(get_db)):
     """Переименовать / обновить категорию."""
     cat = db.query(DeviceCategory).filter_by(code=code).first()
     if not cat:
@@ -114,6 +127,12 @@ def update_category(code: str, data: CategoryUpdateInput, db: Session = Depends(
     cat.display_name = data.display_name.strip()
     cat.sn_prefix    = data.sn_prefix.strip() or None
     db.commit()
+    await ws_manager.broadcast({
+        "type":    "sn_pool_updated",
+        "action":  "category_updated",
+        "message": f"Категория обновлена: {cat.display_name}",
+        "code":    code,
+    })
     return {"ok": True, "message": f"Категория обновлена"}
 
 

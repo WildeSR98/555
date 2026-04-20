@@ -494,5 +494,9 @@ window.addEventListener('ws:device_changed', () => {
         loadTree();
     }, 1500);
 });
+
+// Обновлять дерево при создании / удалении проекта другим пользователем
+window.addEventListener('ws:project_created', () => { clearTimeout(_treeRefreshTimer); _treeRefreshTimer = setTimeout(loadTree, 800); });
+window.addEventListener('ws:project_deleted', () => { clearTimeout(_treeRefreshTimer); _treeRefreshTimer = setTimeout(loadTree, 800); });
 </script>
 {% endblock %}

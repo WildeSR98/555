@@ -148,10 +148,33 @@
                 try { evt = JSON.parse(e.data); } catch { return; }
                 if (evt.type === 'pong') return;
 
+                // Универсальная диспетчеризация — каждая страница слушает нужное
+                const WS_EVENTS = {
+                    'device_status_changed': 'ws:device_changed',
+                    'project_created':       'ws:project_created',
+                    'project_deleted':       'ws:project_deleted',
+                    'route_saved':           'ws:route_saved',
+                    'project_route_saved':   'ws:project_route_saved',
+                    'sn_pool_updated':       'ws:sn_pool_updated',
+                };
+                const evtName = WS_EVENTS[evt.type];
+                if (evtName) {
+                    window.dispatchEvent(new CustomEvent(evtName, {detail: evt}));
+                }
+
+                // Toast — для каждого типа
                 if (evt.type === 'device_status_changed') {
                     showToast(evt);
-                    // Пробрасываем дальше — каждая страница слушает своё
-                    window.dispatchEvent(new CustomEvent('ws:device_changed', {detail: evt}));
+                } else if (evt.type === 'project_created') {
+                    showSimpleToast('📁 Новый проект', evt.name || '', '#22c55e');
+                } else if (evt.type === 'project_deleted') {
+                    showSimpleToast('🗑 Проект удалён', evt.name || '', '#ef4444');
+                } else if (evt.type === 'route_saved') {
+                    showSimpleToast('📋 Маршрут обновлён', evt.route_name || '', '#6366f1');
+                } else if (evt.type === 'project_route_saved') {
+                    showSimpleToast('📋 Маршрут проекта', `${evt.project_name} → ${evt.device_type}`, '#6366f1');
+                } else if (evt.type === 'sn_pool_updated') {
+                    showSimpleToast('🏷️ SN Пул', evt.message || 'Обновлено', '#0ea5e9');
                 }
             };
 
@@ -194,6 +217,23 @@
                 toast.classList.add('hide');
                 setTimeout(() => toast.remove(), 400);
             }, 5000);
+        }
+
+        // ─── Simple Toast (для не-device событий) ───
+        function showSimpleToast(title, body, color) {
+            const container = document.getElementById('ws-toast-container');
+            if (!container) return;
+            const toast = document.createElement('div');
+            toast.className = 'ws-toast';
+            toast.innerHTML = `
+                <div class="ws-toast-title" style="color:${color};">${title}</div>
+                ${body ? `<div class="ws-toast-body">${escapeHTML(body)}</div>` : ''}`;
+            container.appendChild(toast);
+            requestAnimationFrame(() => toast.classList.add('show'));
+            setTimeout(() => {
+                toast.classList.add('hide');
+                setTimeout(() => toast.remove(), 400);
+            }, 4000);
         }
 
         // Запустить при загрузке

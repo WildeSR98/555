@@ -21,6 +21,7 @@ from src.models import (
     RouteConfig, RouteConfigStage, ProjectRouteStage,
     ROUTE_PIPELINE_STAGES,
 )
+from web.ws_manager import manager as ws_manager
 
 router = APIRouter()
 
@@ -161,7 +162,7 @@ def get_project_device_route(project_id: int, device_type: str, db: Session = De
 
 
 @router.put("/{project_id}/device/{device_type}")
-def save_project_device_route(
+async def save_project_device_route(
     project_id: int,
     device_type: str,
     body: SaveProjectRouteBody,
@@ -189,6 +190,12 @@ def save_project_device_route(
         ))
 
     db.commit()
+    await ws_manager.broadcast({
+        "type":         "project_route_saved",
+        "project_id":   project_id,
+        "project_name": project.name,
+        "device_type":  device_type,
+    })
     return {"ok": True, "message": "Маршрут проекта сохранён"}
 
 

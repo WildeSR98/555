@@ -13,6 +13,7 @@ from datetime import datetime
 from src.database import get_db
 from src.models import Project, Device, Operation, SerialNumber, DeviceModel, User, WorkLog, ProjectRoute, RouteConfig
 from web.dependencies import get_current_user
+from web.ws_manager import manager as ws_manager
 
 router = APIRouter()
 
@@ -267,6 +268,14 @@ async def create_project(
             ))
             db.commit()
 
+        await ws_manager.broadcast({
+            "type":        "project_created",
+            "id":          new_proj.id,
+            "name":        new_proj.name,
+            "code":        new_proj.code or "",
+            "device_count": device_count,
+        })
+
         return {"ok": True, "message": f"Проект создан. Сгенерировано устройств: {device_count}"}
         
     except Exception as e:
@@ -305,8 +314,14 @@ async def delete_project(
             )
         ).values(device_id=None, is_used=False))
         
+        proj_name = project.name
         db.delete(project)
         db.commit()
+        await ws_manager.broadcast({
+            "type": "project_deleted",
+            "id":   project_id,
+            "name": proj_name,
+        })
         return {"ok": True, "message": "Проект успешно удален"}
     except Exception as e:
         db.rollback()

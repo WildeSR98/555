@@ -661,5 +661,20 @@ async function resetPrRoute() {
         alert(res.detail || 'Ошибка сброса');
     }
 }
+
+// ── WS: авто-обновление при изменении маршрутов ──────────────────────────────
+let _rcRefreshTimer = null;
+window.addEventListener('ws:route_saved', () => {
+    // Перезагружаем список маршрутов если кто-то другой изменил
+    clearTimeout(_rcRefreshTimer);
+    _rcRefreshTimer = setTimeout(loadConfigs, 800);
+});
+window.addEventListener('ws:project_route_saved', () => {
+    // Обновляем список проектов если вкладка Проекты открыта
+    if (document.getElementById('tabProjects-panel')?.style.display !== 'none') {
+        clearTimeout(_rcRefreshTimer);
+        _rcRefreshTimer = setTimeout(loadPrProjects, 800);
+    }
+});
 </script>
 {% endblock %}
