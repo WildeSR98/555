@@ -31,10 +31,21 @@
     display: flex; align-items: center; justify-content: space-between;
     padding: 10px 14px; border-radius: 8px; margin-bottom: 6px;
     background: rgba(255,255,255,.03); border: 1px solid var(--border);
-    transition: opacity .2s;
+    transition: opacity .2s, border-color .15s;
+    user-select: none;
 }
 .stage-row.disabled-stage { opacity: .45; }
-.stage-num { font-size: 11px; color: var(--text-muted); width: 20px; }
+.stage-row.custom-stage  { border-left: 3px solid rgba(99,102,241,.5); background: rgba(99,102,241,.04); }
+.stage-row.dragging   { opacity: .35; border-style: dashed; }
+.stage-row.drag-over  { border-color: #6366f1; border-top: 2px solid #6366f1; background: rgba(99,102,241,.08); }
+.drag-handle {
+    cursor: grab; padding: 0 10px 0 0;
+    color: #94a3b8; font-size: 18px; line-height: 1;
+    flex-shrink: 0;
+}
+.drag-handle:active { cursor: grabbing; }
+.stage-row.is-default .drag-handle { display: none; }
+.stage-num { font-size: 11px; color: var(--text-muted); width: 22px; flex-shrink:0; }
 .stage-name { flex: 1; font-weight: 500; }
 .stage-status { font-size: 12px; color: var(--text-muted); margin-right: 12px; }
 .toggle-switch { position:relative; display:inline-block; width:44px; height:24px; }
@@ -57,7 +68,35 @@
     border-radius: 4px; background: rgba(99,102,241,.15); color: #6366f1;
     border: 1px solid rgba(99,102,241,.3);
 }
-.actions-bar { display:flex; gap:10px; margin-top:20px; padding-top:16px; border-top: 1px solid var(--border); }
+/* ── Projects tab ── */
+.tab-bar { display:flex; gap:8px; margin-bottom:16px; }
+.tab-btn {
+    padding: 8px 20px; border-radius: 8px; border: 1px solid var(--border);
+    cursor: pointer; font-size: 14px; font-weight: 500;
+    background: var(--card-bg); color: var(--text-muted); transition: all .2s;
+}
+.tab-btn.active { background: #6366f1; color: #fff; border-color: #6366f1; }
+.tab-btn:hover:not(.active) { border-color: #6366f1; color: #6366f1; }
+
+/* Project accordion */
+.pr-layout { display:flex; gap:24px; height: calc(100vh - 170px); }
+.pr-sidebar { width:320px; min-width:280px; background:var(--card-bg); border-radius:12px; padding:14px; overflow-y:auto; border:1px solid var(--border); }
+.pr-editor  { flex:1; background:var(--card-bg); border-radius:12px; padding:24px; overflow-y:auto; border:1px solid var(--border); }
+.pr-project { border-radius:8px; margin-bottom:6px; border:1px solid var(--border); overflow:hidden; }
+.pr-project-hdr { display:flex; align-items:center; gap:8px; padding:10px 12px; cursor:pointer;
+    background:rgba(255,255,255,.02); transition:background .15s; }
+.pr-project-hdr:hover { background:rgba(99,102,241,.08); }
+.pr-project-hdr .arrow { font-size:10px; transition:transform .2s; color:var(--text-muted); margin-left:auto; }
+.pr-project-hdr.open .arrow { transform:rotate(90deg); }
+.pr-dtype-list { display:none; padding:4px 8px 8px; }
+.pr-project-hdr.open + .pr-dtype-list { display:block; }
+.pr-dtype-item { padding:6px 10px; border-radius:6px; cursor:pointer; font-size:13px;
+    display:flex; align-items:center; gap:6px; margin-bottom:2px; }
+.pr-dtype-item:hover { background:rgba(99,102,241,.1); }
+.pr-dtype-item.active { background:rgba(99,102,241,.15); color:#6366f1; font-weight:600; }
+.pr-dtype-item .override-dot { width:6px; height:6px; border-radius:50%; background:#22c55e; flex-shrink:0; }
+.pr-override-badge { font-size:10px; padding:1px 5px; border-radius:3px; background:rgba(34,197,94,.15); color:#22c55e; }
+.actions-bar { display:flex; gap:10px; margin-top:20px; padding-top:16px; border-top:1px solid var(--border); flex-wrap:wrap; }
 </style>
 {% endblock %}
 
@@ -78,6 +117,14 @@
     </div>
 </div>
 
+<!-- Tab bar -->
+<div class="tab-bar">
+    <button class="tab-btn active" id="tabRoutes"   onclick="switchTab('routes')">📋 Маршруты</button>
+    <button class="tab-btn"        id="tabProjects" onclick="switchTab('projects')">📁 Проекты</button>
+</div>
+
+<!-- ═══ Tab: Маршруты ═══ -->
+<div id="tabRoutes-panel">
 <div class="rc-layout">
     <!-- ─── Список маршрутов ─── -->
     <div class="rc-sidebar">
@@ -96,6 +143,23 @@
             <p>Выберите маршрут из списка или создайте новый</p>
         </div>
     </div>
+</div> <!-- end rc-layout -->
+</div> <!-- end tabRoutes-panel -->
+
+<!-- ═══ Tab: Проекты ═══ -->
+<div id="tabProjects-panel" style="display:none;">
+<div class="pr-layout">
+    <div class="pr-sidebar">
+        <div style="font-size:12px; color:var(--text-muted); margin-bottom:10px; text-transform:uppercase; letter-spacing:.5px;">Проекты</div>
+        <div id="prProjectList"><div class="text-muted" style="font-size:13px;">Загрузка...</div></div>
+    </div>
+    <div class="pr-editor" id="prEditor">
+        <div class="no-select">
+            <div style="font-size:48px; margin-bottom:12px;">📁</div>
+            <p>Выберите проект и тип устройства для редактирования маршрута</p>
+        </div>
+    </div>
+</div>
 </div>
 
 <div id="rc-page-meta"
@@ -198,34 +262,51 @@ function renderEditor() {
         </div>
 
         <div id="stagesList">
-            ${rc.stages.map(s => `
-            <div class="stage-row ${!s.is_enabled ? 'disabled-stage' : ''}" id="stage_${s.stage_key}">
-                <span class="stage-num">${s.order_index}.</span>
-                <span class="stage-name">${s.label}</span>
+            ${rc.stages.map((s, idx) =>
+            `<div class="stage-row ${!s.is_enabled ? 'disabled-stage' : ''} ${s.is_custom ? 'custom-stage' : ''}"
+                  data-key="${s.stage_key}" draggable="${canEdit && !isDefault ? 'true' : 'false'}">
+                ${canEdit && !isDefault
+                    ? `<span class="drag-handle" title="Перетащить">⠿</span>`
+                    : ''}
+                <span class="stage-num">${idx + 1}.</span>
+                <span class="stage-name">
+                    ${s.label}
+                    ${s.is_custom ? `<span style="font-size:10px; background:rgba(99,102,241,.15); color:#6366f1; padding:1px 5px; border-radius:3px; margin-left:4px;">польз. этап</span>` : ''}
+                </span>
                 <span class="stage-status">${s.is_enabled ? '● Активен' : '○ Пропуск'}</span>
                 ${canEdit && !isDefault ? `
                 <label class="toggle-switch">
                     <input type="checkbox" ${s.is_enabled ? 'checked' : ''}
                            onchange="toggleStage('${s.stage_key}', this.checked)">
                     <span class="toggle-slider"></span>
-                </label>` : ''}
+                </label>
+                ${s.is_custom
+                    ? `<button onclick="removeCustomStage('${s.stage_key}')" title="Удалить этап"
+                           style="background:none; border:none; cursor:pointer; color:#ef4444; font-size:16px; padding:0 0 0 8px;">✕</button>`
+                    : ''}
+                ` : ''}
             </div>`).join('')}
         </div>
 
         ${canEdit && !isDefault ? `
         <div class="actions-bar">
             <button class="btn btn-primary" onclick="saveConfig()">💾 Сохранить</button>
+            <button class="btn" onclick="addCustomStage()"
+                    style="background:rgba(99,102,241,.12); color:#6366f1; border:1px solid rgba(99,102,241,.3);">
+                ➕ Добавить этап
+            </button>
             <span id="savemsg" style="font-size:13px; color:#22c55e; display:none;">✓ Сохранено</span>
         </div>` : ''}
     `;
     renderList();
+    if (canEdit && !isDefault) initDragDrop();
 }
 
 function toggleStage(key, enabled) {
     const s = currentConfig.stages.find(x => x.stage_key === key);
     if (s) {
         s.is_enabled = enabled;
-        const row = document.getElementById(`stage_${key}`);
+        const row = document.querySelector(`[data-key="${key}"]`);
         if (row) {
             row.classList.toggle('disabled-stage', !enabled);
             row.querySelector('.stage-status').textContent = enabled ? '● Активен' : '○ Пропуск';
@@ -233,8 +314,90 @@ function toggleStage(key, enabled) {
     }
 }
 
+function addCustomStage() {
+    const name = prompt('Название нового этапа (напр. "Калибровка датчиков"):');
+    if (!name || !name.trim()) return;
+    const key = 'CUSTOM::' + name.trim();
+    // Проверяем что этап ещё не существует
+    if (currentConfig.stages.some(s => s.stage_key === key)) {
+        alert('Этап с таким названием уже есть'); return;
+    }
+    currentConfig.stages.push({
+        stage_key:  key,
+        is_enabled: true,
+        order_index: currentConfig.stages.length + 1,
+        label:      name.trim(),
+        is_custom:  true,
+    });
+    renderEditor(currentConfig);
+}
+
+function removeCustomStage(key) {
+    if (!key.startsWith('CUSTOM::')) return;
+    currentConfig.stages = currentConfig.stages.filter(s => s.stage_key !== key);
+    renderEditor(currentConfig);
+}
+
+// ─── Drag & Drop ───
+let _dragSrcKey = null;
+
+function initDragDrop() {
+    const list = document.getElementById('stagesList');
+    if (!list) return;
+
+    list.addEventListener('dragstart', (e) => {
+        const row = e.target.closest('.stage-row');
+        if (!row) return;
+        _dragSrcKey = row.dataset.key;
+        e.dataTransfer.effectAllowed = 'move';
+        setTimeout(() => row.classList.add('dragging'), 0);
+    });
+
+    list.addEventListener('dragend', () => {
+        list.querySelectorAll('.stage-row').forEach(r =>
+            r.classList.remove('dragging', 'drag-over'));
+    });
+
+    list.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        const row = e.target.closest('.stage-row');
+        if (!row || row.dataset.key === _dragSrcKey) return;
+        list.querySelectorAll('.stage-row').forEach(r => r.classList.remove('drag-over'));
+        row.classList.add('drag-over');
+    });
+
+    list.addEventListener('dragleave', (e) => {
+        if (!list.contains(e.relatedTarget))
+            list.querySelectorAll('.stage-row').forEach(r => r.classList.remove('drag-over'));
+    });
+
+    list.addEventListener('drop', (e) => {
+        e.preventDefault();
+        const targetRow = e.target.closest('.stage-row');
+        if (!targetRow || !_dragSrcKey || targetRow.dataset.key === _dragSrcKey) return;
+
+        const srcIdx = currentConfig.stages.findIndex(s => s.stage_key === _dragSrcKey);
+        const tgtIdx = currentConfig.stages.findIndex(s => s.stage_key === targetRow.dataset.key);
+        if (srcIdx === -1 || tgtIdx === -1) return;
+
+        // Переставить элемент в массиве
+        const [moved] = currentConfig.stages.splice(srcIdx, 1);
+        currentConfig.stages.splice(tgtIdx, 0, moved);
+        _dragSrcKey = null;
+
+        // Перерисовать без запроса к серверу
+        renderEditor(currentConfig);
+    });
+}
+
 async function saveConfig() {
-    const stages = currentConfig.stages.map(s => ({stage_key: s.stage_key, is_enabled: s.is_enabled}));
+    // Отправляем order_index по позиции в массиве после drag-and-drop
+    const stages = currentConfig.stages.map((s, idx) => ({
+        stage_key:   s.stage_key,
+        is_enabled:  s.is_enabled,
+        order_index: idx + 1,
+    }));
     const res = await fetch(`/api/route-configs/${currentConfig.id}`, {
         method: 'PUT',
         headers: {'Content-Type': 'application/json'},
@@ -244,6 +407,9 @@ async function saveConfig() {
     if (res.ok) {
         const msg = document.getElementById('savemsg');
         msg.style.display = 'inline';
+        // Обновить конфиг из сервера чтобы order_index был актуальным
+        const fresh = await fetch(`/api/route-configs/${currentConfig.id}`);
+        if (fresh.ok) currentConfig = await fresh.json();
         setTimeout(() => msg.style.display = 'none', 3000);
     } else {
         alert(data.detail || 'Ошибка сохранения');
@@ -289,5 +455,211 @@ async function deleteConfig(id) {
 }
 
 loadConfigs();
+
+// Авто-переключение вкладки по URL-параметру (?tab=projects)
+if (new URLSearchParams(window.location.search).get('tab') === 'projects') {
+    switchTab('projects');
+}
+
+// ══════════════════════════════════════════
+//  TAB SWITCHING
+// ══════════════════════════════════════════
+
+let _prLoaded = false;
+
+function switchTab(tab) {
+    ['routes', 'projects'].forEach(t => {
+        document.getElementById(`tab${t.charAt(0).toUpperCase()+t.slice(1)}-panel`).style.display = t === tab ? '' : 'none';
+        document.getElementById(`tab${t.charAt(0).toUpperCase()+t.slice(1)}`).classList.toggle('active', t === tab);
+    });
+    if (tab === 'projects' && !_prLoaded) {
+        _prLoaded = true;
+        loadPrProjects();
+    }
+}
+
+// ══════════════════════════════════════════
+//  PROJECTS TAB — функции
+// ══════════════════════════════════════════
+
+let prProjects   = [];   // Список проектов
+let prCurrent    = null; // { projectId, deviceType }
+
+async function loadPrProjects() {
+    try {
+        const resp = await fetch('/api/project-routes/projects');
+        prProjects = await resp.json();
+        renderPrProjectList();
+    } catch(e) { console.error(e); }
+}
+
+function renderPrProjectList() {
+    const container = document.getElementById('prProjectList');
+    if (!prProjects.length) {
+        container.innerHTML = '<div class="text-muted" style="font-size:13px;">Нет проектов с устройствами</div>';
+        return;
+    }
+    container.innerHTML = prProjects.map(p => `
+        <div class="pr-project" id="prp-${p.id}">
+            <div class="pr-project-hdr" onclick="togglePrProject(${p.id})">
+                <span style="font-size:16px;">📁</span>
+                <span style="font-weight:600; font-size:14px;">${escapeHTML(p.name)}</span>
+                ${p.code ? `<code style="font-size:11px; color:var(--text-muted);">${escapeHTML(p.code)}</code>` : ''}
+                <span class="arrow">▶</span>
+            </div>
+            <div class="pr-dtype-list" id="prdt-${p.id}">
+                ${p.device_types.map(dt => `
+                    <div class="pr-dtype-item" id="prdi-${p.id}-${dt}"
+                         onclick="loadPrDeviceRoute(${p.id}, '${dt}')">
+                        <span>📦</span>
+                        <span class="dt-name">${escapeHTML(dt)}</span>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `).join('');
+}
+
+function togglePrProject(pid) {
+    const hdr = document.querySelector(`#prp-${pid} .pr-project-hdr`);
+    hdr.classList.toggle('open');
+}
+
+async function loadPrDeviceRoute(projectId, deviceType) {
+    // Снимаем активность со всех
+    document.querySelectorAll('.pr-dtype-item').forEach(el => el.classList.remove('active'));
+    const itm = document.getElementById(`prdi-${projectId}-${deviceType}`);
+    if (itm) itm.classList.add('active');
+
+    prCurrent = { projectId, deviceType };
+
+    const editor = document.getElementById('prEditor');
+    editor.innerHTML = '<div class="text-muted" style="padding:40px; text-align:center;">⏳ Загрузка...</div>';
+
+    try {
+        const resp = await fetch(`/api/project-routes/${projectId}/device/${deviceType}`);
+        const data = await resp.json();
+        if (!resp.ok) { editor.innerHTML = `<div class="text-muted">${data.detail}</div>`; return; }
+        renderPrEditor(data);
+
+        // Обновить бейдж override
+        const dot = itm?.querySelector('.pr-override-badge');
+        if (dot) dot.remove();
+        if (data.is_override && itm)
+            itm.insertAdjacentHTML('beforeend', `<span class="pr-override-badge">изменён</span>`);
+    } catch(e) { editor.innerHTML = `<div class="text-muted">${e.message}</div>`; }
+}
+
+function renderPrEditor(data) {
+    const editor = document.getElementById('prEditor');
+    const isOverride = data.is_override;
+    const canEdit = document.getElementById('rc-page-meta')?.dataset.canEdit === 'true';
+
+    editor.innerHTML = `
+        <div class="editor-header">
+            <div>
+                <h2 style="margin:0; font-size:20px;">
+                    ${escapeHTML(data.project_name)}
+                    <span style="font-size:14px; font-weight:400; color:var(--text-muted);">→</span>
+                    <span class="device-type-badge">📦 ${escapeHTML(data.type_display)}</span>
+                </h2>
+                <div style="margin-top:6px; font-size:13px; color:var(--text-muted);">
+                    ${data.device_count} устройств · 
+                    ${isOverride
+                        ? '<span style="color:#22c55e;">✓ Индивидуальный маршрут</span>'
+                        : '<span style="color:#94a3b8;">Используется глобальный маршрут</span>'}
+                </div>
+            </div>
+        </div>
+
+        <div id="prStagesList">
+            ${data.stages.map((s, idx) => `
+            <div class="stage-row ${!s.is_enabled ? 'disabled-stage' : ''} ${s.is_custom ? 'custom-stage' : ''}"
+                 data-key="${s.stage_key}">
+                <span class="stage-num">${idx + 1}.</span>
+                <span class="stage-name">
+                    ${escapeHTML(s.label)}
+                    ${s.is_custom ? `<span style="font-size:10px; background:rgba(99,102,241,.15); color:#6366f1; padding:1px 5px; border-radius:3px; margin-left:4px;">польз. этап</span>` : ''}
+                </span>
+                <span class="stage-status">${s.is_enabled ? '● Активен' : '○ Пропуск'}</span>
+                ${canEdit ? `
+                <label class="toggle-switch">
+                    <input type="checkbox" ${s.is_enabled ? 'checked' : ''}
+                           onchange="prToggleStage('${s.stage_key}', this.checked)">
+                    <span class="toggle-slider"></span>
+                </label>` : ''}
+            </div>`).join('')}
+        </div>
+
+        ${canEdit ? `
+        <div class="actions-bar">
+            <button class="btn btn-primary" onclick="savePrRoute()">💾 Сохранить для проекта</button>
+            ${isOverride ? `<button class="btn" onclick="resetPrRoute()"
+                    style="background:rgba(239,68,68,.1); color:#ef4444; border:1px solid rgba(239,68,68,.3);">
+                ↺ Сбросить до глобального</button>` : ''}
+            <span id="prSavemsg" style="font-size:13px; color:#22c55e; display:none;">✓ Сохранено</span>
+        </div>` : ''}
+    `;
+
+    // Сохраняем текущие stages в prCurrent
+    prCurrent.stages = data.stages.map(s => ({...s}));
+}
+
+function escapeHTML(str) {
+    const d = document.createElement('div');
+    d.textContent = str || '';
+    return d.innerHTML;
+}
+
+function prToggleStage(key, enabled) {
+    if (!prCurrent?.stages) return;
+    const s = prCurrent.stages.find(x => x.stage_key === key);
+    if (s) {
+        s.is_enabled = enabled;
+        const row = document.querySelector(`#prStagesList [data-key="${key}"]`);
+        if (row) {
+            row.classList.toggle('disabled-stage', !enabled);
+            row.querySelector('.stage-status').textContent = enabled ? '● Активен' : '○ Пропуск';
+        }
+    }
+}
+
+async function savePrRoute() {
+    if (!prCurrent) return;
+    const stages = (prCurrent.stages || []).map((s, idx) => ({
+        stage_key:   s.stage_key,
+        is_enabled:  s.is_enabled,
+        order_index: idx + 1,
+        label: s.is_custom ? s.label : undefined,
+    }));
+    const resp = await fetch(`/api/project-routes/${prCurrent.projectId}/device/${prCurrent.deviceType}`, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({stages}),
+    });
+    const res = await resp.json();
+    if (resp.ok) {
+        const msg = document.getElementById('prSavemsg');
+        if (msg) { msg.style.display = 'inline'; setTimeout(() => msg.style.display = 'none', 3000); }
+        // Перезагрузить чтобы обновить бейдж
+        await loadPrDeviceRoute(prCurrent.projectId, prCurrent.deviceType);
+    } else {
+        alert(res.detail || 'Ошибка сохранения');
+    }
+}
+
+async function resetPrRoute() {
+    if (!prCurrent) return;
+    if (!confirm('Сбросить индивидуальный маршрут и вернуться к глобальному?')) return;
+    const resp = await fetch(`/api/project-routes/${prCurrent.projectId}/device/${prCurrent.deviceType}`, {
+        method: 'DELETE',
+    });
+    const res = await resp.json();
+    if (resp.ok) {
+        await loadPrDeviceRoute(prCurrent.projectId, prCurrent.deviceType);
+    } else {
+        alert(res.detail || 'Ошибка сброса');
+    }
+}
 </script>
 {% endblock %}

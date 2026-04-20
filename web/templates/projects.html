@@ -67,7 +67,12 @@
             <tbody id="detailsBody"></tbody>
         </table>
 
-        <div style="text-align:right; margin-top:20px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:20px; flex-wrap:wrap; gap:8px;">
+            <button id="btnRouteSheets" class="btn" style="display:none;
+                    background:rgba(99,102,241,.12); color:#6366f1; border:1px solid rgba(99,102,241,.3);"
+                    onclick="openProjectRoutes()">
+                📋 Маршрутные листы
+            </button>
             <button id="btnDelete" class="btn btn-danger" style="display:none;" onclick="deleteProject()">🗑 Удалить проект</button>
         </div>
     </div>
@@ -106,6 +111,11 @@
                     <option value="">— Автовыбор —</option>
                 </select>
                 <div id="routeHint" style="font-size:11px; color:#6366f1; margin-top:4px;"></div>
+                <!-- Перечение маршрутов по типам устройств -->
+                <div id="routeBreakdown" style="display:none; margin-top:10px; padding:10px 12px; background:rgba(99,102,241,.05); border:1px solid rgba(99,102,241,.2); border-radius:6px;">
+                    <div style="font-size:11px; font-weight:700; color:var(--text-muted); margin-bottom:6px; text-transform:uppercase; letter-spacing:.5px;">📋 Маршруты по типам устройств:</div>
+                    <div id="routeBreakdownList"></div>
+                </div>
             </div>
 
             <div class="modal-buttons" style="margin-top:20px;">
@@ -131,15 +141,21 @@
 {% endblock %}
 
 {% block extra_js %}
+<!-- Данные для JS: модели устройств -->
+<script id="device-models-data" type="application/json">
+[
+    {% for dm in device_models %}
+    {"id": {{ dm.id }}, "category": "{{ dm.category }}", "name": "{{ dm.name }}"}{% if not loop.last %},{% endif %}
+    {% endfor %}
+]
+</script>
 <script>
 let treeData = [];
 let currentProjectId = null;
 
-const deviceModels = [
-    {% for dm in device_models %}
-    { id: {{ dm.id }}, category: "{{ dm.category }}", name: "{{ dm.name }}" },
-    {% endfor %}
-];
+const deviceModels = JSON.parse(
+    document.getElementById('device-models-data').textContent
+);
 
 document.addEventListener('DOMContentLoaded', () => {
     loadTree();
@@ -244,7 +260,9 @@ async function loadDetails(type, id) {
     if(type === 'project') currentProjectId = id;
     else currentProjectId = null;
     
-    document.getElementById('btnDelete').style.display = type === 'project' ? 'inline-block' : 'none';
+    document.getElementById('btnDelete').style.display      = type === 'project' ? 'inline-block' : 'none';
+    document.getElementById('btnRouteSheets').style.display  = type === 'project' ? 'inline-block' : 'none';
+    if (type === 'project') document.getElementById('btnRouteSheets').dataset.pid = id;
     
     try {
         const resp = await fetch(`/api/projects/${type}/${id}`);
@@ -302,6 +320,10 @@ async function deleteProject() {
     }
 }
 
+function openProjectRoutes() {
+    window.location.href = '/route-configs?tab=projects';
+}
+
 // ------ Форма создания ------
 function openCreateModal() {
     document.getElementById('createForm').reset();
@@ -336,6 +358,7 @@ function addDeviceRow() {
         <button type="button" class="btn btn-danger" onclick="this.parentElement.remove()">❌</button>
     `;
     container.appendChild(row);
+    updateRouteBreakdown();
 }
 
 let allRouteConfigs = [];
@@ -366,15 +389,59 @@ function updateModels(categorySelect) {
 function autoSelectRoute(deviceType) {
     const sel = document.getElementById('pRouteConfig');
     const hint = document.getElementById('routeHint');
-    const opt = Array.from(sel.options).find(o => o.dataset.dtype === deviceType);
-    if (opt) {
-        sel.value = opt.value;
-        hint.textContent = `✓ Автоматически выбран: ${opt.textContent}`;
+    if (!allRouteConfigs.length) return;
+
+    // Все маршруты для этого типа
+    const matches = allRouteConfigs.filter(rc => rc.device_type === deviceType);
+
+    if (matches.length > 1) {
+        // Несколько маршрутов — отобразить все в dropdown, пусть пользователь выберет
+        sel.value = matches[0].id;
+        hint.innerHTML = `⚠️ Несколько маршрутов для <b>${deviceType}</b>: ` +
+            matches.map(rc => `<em>${rc.name}</em>`).join(', ') +
+            '. Выберите нужный.';
+    } else if (matches.length === 1) {
+        sel.value = matches[0].id;
+        hint.textContent = `✓ Автоматически выбран: ${matches[0].name}`;
     } else {
-        const defOpt = Array.from(sel.options).find(o => o.dataset.dtype === '');
-        if (defOpt) { sel.value = defOpt.value; hint.textContent = 'ℹ️ Дефолтный маршрут'; }
+        const def = allRouteConfigs.find(rc => rc.is_default);
+        if (def) { sel.value = def.id; hint.textContent = 'ℹ️ Используется стандартный маршрут'; }
         else hint.textContent = '';
     }
+    updateRouteBreakdown();
+}
+
+function updateRouteBreakdown() {
+    // Собираем уникальные типы устройств из всех строк
+    const types = {};
+    document.querySelectorAll('.dev-row').forEach(row => {
+        const cat  = row.querySelector('.dev-category')?.value;
+        const qty  = parseInt(row.querySelector('.dev-qty')?.value || '1') || 1;
+        if (cat) types[cat] = (types[cat] || 0) + qty;
+    });
+
+    const keys = Object.keys(types);
+    const bd   = document.getElementById('routeBreakdown');
+    if (!bd) return;
+
+    if (keys.length <= 1) {
+        bd.style.display = 'none';
+        return;
+    }
+
+    // Показываем только если несколько типов
+    bd.style.display = 'block';
+    document.getElementById('routeBreakdownList').innerHTML = keys.map(type => {
+        const rc = allRouteConfigs.find(r => r.device_type === type)
+                || allRouteConfigs.find(r => r.is_default)
+                || {name: 'Стандартный'};
+        return `<div style="font-size:13px; padding:3px 0; display:flex; gap:6px; align-items:center;">
+            <span style="font-weight:600;">📦 ${escapeHTML(type)}</span>
+            <span style="color:var(--text-muted); font-size:11px;">(${types[type]} шт.)</span>
+            <span style="color:var(--text-muted);">→</span>
+            <span style="color:#6366f1; font-weight:500;">${escapeHTML(rc.name)}</span>
+        </div>`;
+    }).join('');
 }
 
 async function submitCreate(e) {
@@ -414,5 +481,18 @@ async function submitCreate(e) {
         alert(e.message);
     }
 }
+</script>
+
+<script>
+// ─── WebSocket: авто-обновление дерева при изменении статуса устройства ───
+let _treeRefreshTimer = null;
+
+window.addEventListener('ws:device_changed', () => {
+    // Debounce 1.5s — чтобы батч из нескольких сканов не вызвал лишних запросов
+    clearTimeout(_treeRefreshTimer);
+    _treeRefreshTimer = setTimeout(() => {
+        loadTree();
+    }, 1500);
+});
 </script>
 {% endblock %}

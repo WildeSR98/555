@@ -668,3 +668,38 @@ class ProjectRoute(Base):
 
     def __repr__(self) -> str:
         return f"ProjectRoute(project={self.project_id} → route={self.route_config_id})"
+
+
+class DeviceCategory(Base):
+    """Динамические категории устройств (перекрывают хардкодный Device.DEVICE_TYPE_DISPLAY)."""
+    __tablename__ = 'pm_device_category'
+
+    code         = Column(String(50), primary_key=True)   # Ключ тип. 'TIOGA', 'NEWCAT'
+    display_name = Column(String(200), nullable=False)    # Отображаемое имя
+    sn_prefix    = Column(String(50), nullable=True)      # Префикс SN
+    sort_order   = Column(Integer, default=100)           # Порядок отображения
+
+    def __repr__(self) -> str:
+        return f"DeviceCategory({self.code}: {self.display_name})"
+
+
+class ProjectRouteStage(Base):
+    """Индивидуальный маршрут проекта по типу устройства.
+
+    Перекрывает глобальный RouteConfig для конкретного проекта.
+    Если записей нет — используется глобальный RouteConfig для данного device_type.
+    """
+    __tablename__ = 'pm_project_route_stage'
+
+    id          = Column(Integer, primary_key=True, autoincrement=True)
+    project_id  = Column(Integer, ForeignKey('tasks_project.id', ondelete='CASCADE'), nullable=False)
+    device_type = Column(String(50), nullable=False)
+    stage_key   = Column(String(200), nullable=False)
+    order_index = Column(Integer, nullable=False)
+    is_enabled  = Column(Boolean, default=True)
+    label       = Column(String(200), nullable=True)
+
+    project = relationship('Project', backref='route_stages')
+
+    def __repr__(self) -> str:
+        return f"ProjectRouteStage(p={self.project_id} {self.device_type} {self.stage_key})"

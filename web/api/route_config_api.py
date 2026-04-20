@@ -42,7 +42,11 @@ def _serialize(rc: RouteConfig) -> dict:
                 "stage_key":   s.stage_key,
                 "order_index": s.order_index,
                 "is_enabled":  s.is_enabled,
-                "label":       next((lbl for k, lbl, _ in ROUTE_PIPELINE_STAGES if k == s.stage_key), s.stage_key),
+                "label":       next(
+                    (lbl for k, lbl, _ in ROUTE_PIPELINE_STAGES if k == s.stage_key),
+                    s.stage_key[8:] if s.stage_key.startswith('CUSTOM::') else s.stage_key
+                ),
+                "is_custom":   s.stage_key.startswith('CUSTOM::'),
             }
             for s in rc.stages
         ],
@@ -55,6 +59,7 @@ def _serialize(rc: RouteConfig) -> dict:
 class StageInput(BaseModel):
     stage_key: str
     is_enabled: bool
+    order_index: Optional[int] = None  # позиция после drag-and-drop
 
 
 class RouteConfigCreate(BaseModel):
@@ -173,12 +178,12 @@ def update_route_config(
         for st in rc.stages:
             db.delete(st)
         db.flush()
-        for s in data.stages:
-            idx = next((i for k, _, i in ROUTE_PIPELINE_STAGES if k == s.stage_key), 99)
+        for pos, s in enumerate(data.stages):
+            order_idx = s.order_index if s.order_index is not None else (pos + 1)
             db.add(RouteConfigStage(
                 route_config_id=rc.id,
                 stage_key=s.stage_key,
-                order_index=idx,
+                order_index=order_idx,
                 is_enabled=s.is_enabled,
             ))
 

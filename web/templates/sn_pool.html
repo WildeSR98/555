@@ -11,6 +11,10 @@
     <div style="display:flex; gap:10px;">
         <button class="btn btn-primary" onclick="loadTree()">⟳ Обновить</button>
         <button class="btn btn-success" onclick="openAddModelModal()">➕ Добавить модель</button>
+        <button class="btn" onclick="openAddCategoryModal()"
+                style="background:rgba(99,102,241,.12); color:#6366f1; border:1px solid rgba(99,102,241,.3);">
+            📂 Добавить категорию
+        </button>
     </div>
 </div>
 
@@ -79,6 +83,63 @@
     </div>
 </div>
 
+<!-- Модалка: Добавить категорию -->
+<div id="categoryAddModal" class="modal-overlay" style="display:none;">
+    <div class="modal-card">
+        <h3>📂 Добавить категорию устройств</h3>
+        <form onsubmit="submitAddCategory(event)">
+            <div class="form-group">
+                <label>Код (латиница, без пробелов):</label>
+                <input type="text" id="catCode" required placeholder="Напр: NEWDEV"
+                       style="text-transform:uppercase;" oninput="this.value=this.value.toUpperCase()">
+                <div style="font-size:11px; color:var(--text-muted); margin-top:3px;">
+                    Внутренний идентификатор. После создания нельзя изменить.
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Название для отображения:</label>
+                <input type="text" id="catDisplayName" required placeholder="Напр: Новое устройство">
+            </div>
+            <div class="form-group">
+                <label>Префикс SN (для генерации серийных номеров):</label>
+                <input type="text" id="catSnPrefix" required placeholder="Напр: 60NDVXXX">
+            </div>
+            <div class="modal-buttons">
+                <button type="button" class="btn" style="background:var(--border);" onclick="closeModal('categoryAddModal')">Отмена</button>
+                <button type="submit" class="btn btn-primary">💾 Создать категорию</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Модалка: Редактировать категорию -->
+<div id="categoryEditModal" class="modal-overlay" style="display:none;">
+    <div class="modal-card">
+        <h3>⚙️ Редактировать категорию</h3>
+        <input type="hidden" id="editCatCode">
+        <div class="form-group">
+            <label>Код категории:</label>
+            <input type="text" id="editCatCodeDisplay" disabled
+                   style="opacity:.6; cursor:not-allowed; background:var(--card-bg);">
+            <div style="font-size:11px; color:var(--text-muted); margin-top:3px;">Код нельзя изменить</div>
+        </div>
+        <form onsubmit="submitEditCategory(event)">
+            <div class="form-group">
+                <label>Название для отображения:</label>
+                <input type="text" id="editCatName" required>
+            </div>
+            <div class="form-group">
+                <label>Префикс SN:</label>
+                <input type="text" id="editCatPrefix" placeholder="Напр: 60LXTRDC">
+            </div>
+            <div class="modal-buttons">
+                <button type="button" class="btn" style="background:var(--border);" onclick="closeModal('categoryEditModal')">Отмена</button>
+                <button type="submit" class="btn btn-primary">💾 Сохранить</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <!-- Модалка: Задать счетчик -->
 <div id="counterModal" class="modal-overlay" style="display:none;">
     <div class="modal-card">
@@ -101,11 +162,29 @@
 </div>
 
 <style>
-.tree-cat { font-weight: bold; padding: 8px 5px; cursor: pointer; user-select: none; }
+.tree-cat {
+    font-weight: bold; padding: 8px 5px; cursor: pointer; user-select: none;
+    display: flex; align-items: center; gap:4px;
+}
 .tree-cat:hover { background: #f8fafc; }
-.tree-mod { padding: 6px 5px 6px 25px; cursor: pointer; font-size: 14px; position:relative; }
+.tree-cat .cat-name { flex: 1; }
+.tree-cat .cat-edit-btn {
+    display: none; background: none; border: none; cursor: pointer;
+    font-size: 13px; color: #94a3b8; padding: 2px 5px; border-radius: 4px;
+}
+.tree-cat:hover .cat-edit-btn { display: inline-block; }
+.tree-cat .cat-edit-btn:hover { background: rgba(99,102,241,.15); color: #6366f1; }
+.tree-mod { padding: 6px 5px 6px 25px; cursor: pointer; font-size: 14px; position:relative; display:flex; align-items:center; gap:4px; }
 .tree-mod:hover { background: #f1f5f9; }
 .tree-mod.active { background: #e0f2fe; color: #0284c7; font-weight: 600; border-right: 3px solid #0284c7; }
+.tree-mod .mod-name { flex: 1; }
+.tree-mod .edit-btn {
+    display: none; background: none; border: none; cursor: pointer;
+    font-size: 13px; color: #94a3b8; padding: 2px 5px;
+    border-radius: 4px; flex-shrink: 0; line-height:1;
+}
+.tree-mod:hover .edit-btn  { display: inline-block; }
+.tree-mod .edit-btn:hover   { background: rgba(99,102,241,.15); color: #6366f1; }
 </style>
 {% endblock %}
 
@@ -135,7 +214,12 @@ async function loadTree() {
         
         data.forEach(cat => {
             const li = document.createElement('li');
-            li.innerHTML = `<div class="tree-cat">📁 ${escapeHTML(cat.name)}</div>`;
+            const catName = escapeHTML(cat.name);
+            li.innerHTML = `<div class="tree-cat">
+                <span class="cat-name">📁 ${catName}</span>
+                <button class="cat-edit-btn" title="Редактировать категорию"
+                        onclick="openEditCategoryModal('${cat.id}', '${catName}', event)">⚙️</button>
+            </div>`;
             const mul = document.createElement('ul');
             mul.style.listStyle = 'none';
             mul.style.padding = '0';
@@ -143,14 +227,19 @@ async function loadTree() {
             cat.models.forEach(m => {
                 const mli = document.createElement('li');
                 mli.className = 'tree-mod';
-                mli.innerHTML = `📄 ${escapeHTML(m.name)}`;
+                mli.dataset.id = m.id;
+                mli.innerHTML = `
+                    <span class="mod-name">📄 ${escapeHTML(m.name)}</span>
+                    <button class="edit-btn" title="Переименовать"
+                            onclick="renameModel(${m.id}, '${m.name.replace(/'/g, "\\'").replace(/"/g, '&quot;')}', event)">✏️</button>`;
                 if (currentModelId === m.id) mli.classList.add('active');
-                
-                mli.onclick = (e) => {
+
+                mli.addEventListener('click', (e) => {
+                    if (e.target.classList.contains('edit-btn')) return;
                     document.querySelectorAll('.tree-mod').forEach(el => el.classList.remove('active'));
                     mli.classList.add('active');
                     loadModelSNs(m.id, m.name);
-                };
+                });
                 mul.appendChild(mli);
             });
             li.appendChild(mul);
@@ -281,6 +370,100 @@ async function submitCounter(e) {
 
 function closeModal(id) {
     document.getElementById(id).style.display = 'none';
+}
+
+async function renameModel(modelId, currentName, event) {
+    event.stopPropagation();
+    const newName = prompt('Новое название модели:', currentName);
+    if (!newName || newName.trim() === currentName.trim()) return;
+
+    try {
+        const resp = await fetch(`/api/sn-pool/models/${modelId}`, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name: newName.trim()})
+        });
+        const res = await resp.json();
+        if (resp.ok) {
+            // Если переименована активная модель — обновить заголовок
+            if (currentModelId === modelId) {
+                currentModelName = newName.trim();
+                document.getElementById('tableTitle').textContent = `Модель: ${newName.trim()}`;
+            }
+            loadTree();
+        } else {
+            alert(res.detail || 'Ошибка переименования');
+        }
+    } catch(e) { alert(e.message); }
+}
+
+// ──────────────── Категории ────────────────
+
+function openAddCategoryModal() {
+    document.getElementById('catCode').value = '';
+    document.getElementById('catDisplayName').value = '';
+    document.getElementById('catSnPrefix').value = '';
+    document.getElementById('categoryAddModal').style.display = 'flex';
+}
+
+async function submitAddCategory(e) {
+    e.preventDefault();
+    const payload = {
+        code:         document.getElementById('catCode').value.trim().toUpperCase(),
+        display_name: document.getElementById('catDisplayName').value.trim(),
+        sn_prefix:    document.getElementById('catSnPrefix').value.trim(),
+    };
+    try {
+        const resp = await fetch('/api/sn-pool/categories', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        });
+        const res = await resp.json();
+        if (resp.ok) {
+            alert(res.message);
+            closeModal('categoryAddModal');
+            await fetchCategories();
+            loadTree();
+        } else {
+            alert(res.detail || 'Ошибка создания категории');
+        }
+    } catch(e) { alert(e.message); }
+}
+
+function openEditCategoryModal(code, displayName, event) {
+    if (event) event.stopPropagation();
+    // Найти текущие данные из categories
+    const cat = categories.find(c => c.id === code);
+    document.getElementById('editCatCode').value        = code;
+    document.getElementById('editCatCodeDisplay').value = code;
+    document.getElementById('editCatName').value        = cat ? cat.name   : displayName;
+    document.getElementById('editCatPrefix').value      = cat ? (cat.prefix || '') : '';
+    document.getElementById('categoryEditModal').style.display = 'flex';
+}
+
+async function submitEditCategory(e) {
+    e.preventDefault();
+    const code    = document.getElementById('editCatCode').value;
+    const payload = {
+        display_name: document.getElementById('editCatName').value.trim(),
+        sn_prefix:    document.getElementById('editCatPrefix').value.trim(),
+    };
+    try {
+        const resp = await fetch(`/api/sn-pool/categories/${code}`, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        });
+        const res = await resp.json();
+        if (resp.ok) {
+            closeModal('categoryEditModal');
+            await fetchCategories();
+            loadTree();
+        } else {
+            alert(res.detail || 'Ошибка сохранения');
+        }
+    } catch(e) { alert(e.message); }
 }
 </script>
 {% endblock %}
