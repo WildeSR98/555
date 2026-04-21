@@ -635,6 +635,7 @@ class RouteConfigStage(Base):
     order_index      = Column(Integer, nullable=False)
     is_enabled       = Column(Boolean, default=True)
     label            = Column(String(100), nullable=True)   # кастомный ярлык (напр. «Комплектовка-доукомплектование»)
+    timer_seconds     = Column(Integer, nullable=True)          # таймер этапа в секундах
 
     route_config = relationship('RouteConfig', back_populates='stages')
 
@@ -700,7 +701,8 @@ class ProjectRouteStage(Base):
     stage_key   = Column(String(200), nullable=False)
     order_index = Column(Integer, nullable=False)
     is_enabled  = Column(Boolean, default=True)
-    label       = Column(String(200), nullable=True)
+    label         = Column(String(200), nullable=True)
+    timer_seconds = Column(Integer, nullable=True)   # таймер этапа в секундах
 
     project = relationship('Project', backref='route_stages')
 

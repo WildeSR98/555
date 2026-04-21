@@ -97,7 +97,20 @@
                     <button id="btnComplete" class="btn btn-success" style="font-weight:bold; padding:15px;" onclick="handleComplete()">✅ Готово</button>
                     <button id="btnDefect" class="btn btn-danger" style="font-weight:bold; padding:15px;" onclick="openCommentModal('defect')">⚠️ Брак</button>
                     <button id="btnSemifinished" class="btn btn-secondary" onclick="doAction('semifinished')">🔧 Отпр. в Полуфабрикат</button>
+
+                    <!-- Загрузка фото устройства на сетевую шару -->
+                    <div style="border-top:1px solid var(--border); padding-top:10px; margin-top:2px;">
+                        <button id="btnUploadPhoto" class="btn btn-secondary"
+                                style="width:100%; font-size:13px;"
+                                onclick="sendDevicePhotos()">
+                            📷 Отправить фото
+                        </button>
+                        <div id="photoUploadStatus" style="display:none; font-size:12px; margin-top:8px;
+                             padding:8px 10px; border-radius:6px; line-height:1.5;"></div>
+                    </div>
                 </div>
+
+
             </div>
 
         </div>
@@ -834,7 +847,69 @@ async function doAction(actionName, notes = '', targetStatus = null) {
     }
 }
 
+// ─── Отправка фото устройства на сетевую шару ──────────────────────────────
+async function sendDevicePhotos() {
+    const device = state.devices.length > 0 ? state.devices[0] : null;
+    if (!device) {
+        alert('Нет устройства в работе. Сначала примите устройство.');
+        return;
+    }
+
+    const btn    = document.getElementById('btnUploadPhoto');
+    const status = document.getElementById('photoUploadStatus');
+
+    // UI — состояние загрузки
+    btn.disabled = true;
+    btn.textContent = '⏳ Отправка...';
+    status.style.display = 'block';
+    status.style.background = '#dbeafe';
+    status.style.color = '#1e40af';
+    status.innerHTML = `📤 Проверяем папку для <strong>${escapeHTML(device.sn)}</strong>...`;
+
+    try {
+        const resp = await fetch('/api/scan/send-photos', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                sn:           device.sn,
+                device_id:    device.id,
+                workplace_id: state.workplaceId,
+            })
+        });
+        const res = await resp.json();
+
+        if (res.ok) {
+            status.style.background = '#d1fae5';
+            status.style.color      = '#065f46';
+            status.innerHTML = `
+                ✅ <strong>Фото отправлены</strong> (${res.copied} шт.)<br>
+                <span style="font-size:11px; opacity:0.8;">📁 ${escapeHTML(res.dest)}</span>
+            `;
+            btn.textContent = '📷 Ещё фото';
+        } else {
+            // Папка пуста — жёлтый
+            const isEmpty = res.message && res.message.includes('не найдены');
+            status.style.background = isEmpty ? '#fef9c3' : '#fee2e2';
+            status.style.color      = isEmpty ? '#854d0e' : '#991b1b';
+            status.innerHTML = `
+                ${escapeHTML(res.message)}
+                ${res.hint ? `<br><small style="opacity:0.8">${escapeHTML(res.hint)}</small>` : ''}
+            `;
+            btn.textContent = '📷 Повторить';
+        }
+    } catch (e) {
+        status.style.background = '#fee2e2';
+        status.style.color      = '#991b1b';
+        status.innerHTML = `❌ Ошибка сети: ${escapeHTML(e.message)}`;
+        btn.textContent = '📷 Повторить';
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+
 // Функции для модалки Спецификации
+
 function openSpecModal(link) {
     document.getElementById('specModal').style.display = 'flex';
     document.getElementById('specCodeInput').value = '';

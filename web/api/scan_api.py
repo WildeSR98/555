@@ -477,3 +477,153 @@ def end_session(data: EndSessionRequest, db: Session = Depends(get_db)):
         ws.ended_at = datetime.now()
         db.commit()
     return {"ok": True}
+
+
+# ─── Отправка фото с поста на сетевую шару ────────────────────────────────────
+
+import os, shutil, subprocess, ctypes
+from pathlib import Path
+
+# Маппинг типа рабочего места → подпапка на шаре
+WORKPLACE_PHOTO_FOLDER = {
+    'PRE_PRODUCTION':    'Complectation',
+    'VIBROSTAND':        'Vibrostand',
+    'TECH_CONTROL_1_1':  'OTK',
+    'TECH_CONTROL_1_2':  'OTK',
+    'TECH_CONTROL_2_1':  'OTK',
+    'TECH_CONTROL_2_2':  'OTK',
+    'FUNC_CONTROL':      'Tests',
+    'PACKING':           'Packing',
+    'WAREHOUSE':         'Warehouse',
+}
+
+IMG_SOURCE_DIR  = Path(os.getenv('IMG_SOURCE_DIR',  r'C:\Photos\Upload'))
+IMG_NET_SERVER  = os.getenv('IMG_NET_SERVER',  r'\\192.168.106.29')
+IMG_NET_SHARE   = os.getenv('IMG_NET_SHARE',   'PR_DEP')
+IMG_NET_USER    = os.getenv('IMG_NET_USER',    'PR_DEP')
+IMG_NET_PASS    = os.getenv('IMG_NET_PASS',    'P@ssw0rd')
+IMG_NET_BASE    = os.getenv('IMG_NET_BASE',    'Assembly')
+IMG_DELETE_AFTER = os.getenv('IMG_DELETE_AFTER', 'True').lower() in ('true', '1', 'yes')
+IMG_EXTENSIONS  = {f".{e.strip().lower()}" for e in
+                   os.getenv('IMG_EXTENSIONS', 'jpg,jpeg,png,bmp,gif,webp,tiff,tif').split(',')}
+
+
+class SendPhotosRequest(BaseModel):
+    sn:           str
+    device_id:    int
+    workplace_id: int
+
+
+def _net_connect(server_share: str, user: str, password: str) -> int:
+    """Подключиться к сетевой шаре через WNetAddConnection2 (Windows API)."""
+    class NETRESOURCE(ctypes.Structure):
+        _fields_ = [
+            ('dwScope',       ctypes.c_ulong),
+            ('dwType',        ctypes.c_ulong),
+            ('dwDisplayType', ctypes.c_ulong),
+            ('dwUsage',       ctypes.c_ulong),
+            ('lpLocalName',   ctypes.c_wchar_p),
+            ('lpRemoteName',  ctypes.c_wchar_p),
+            ('lpComment',     ctypes.c_wchar_p),
+            ('lpProvider',    ctypes.c_wchar_p),
+        ]
+    nr = NETRESOURCE()
+    nr.dwType      = 1          # RESOURCETYPE_DISK
+    nr.lpRemoteName = server_share
+    nr.lpLocalName  = None
+    nr.lpProvider   = None
+    mpr = ctypes.windll.mpr
+    return mpr.WNetAddConnection2W(ctypes.byref(nr), password, user, 0)
+
+
+@router.post("/send-photos")
+def send_device_photos(
+    data: SendPhotosRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Отправить фото с локального ПК в папку устройства на сетевой шаре.
+    Путь: \\\\{server}\\{share}\\Assembly\\{project_name}\\{post_folder}\\{SN}\\
+    """
+    sn = data.sn.strip()
+
+    # ── 1. Проверяем локальную папку ──
+    if not IMG_SOURCE_DIR.exists():
+        return {"ok": False, "message": f"⚠️ Папка не найдена: {IMG_SOURCE_DIR}",
+                "hint": f"Создайте папку или укажите IMG_SOURCE_DIR в .env"}
+
+    images = [f for f in IMG_SOURCE_DIR.iterdir()
+              if f.is_file() and f.suffix.lower() in IMG_EXTENSIONS]
+    if not images:
+        return {"ok": False, "message": f"⚠️ Фото не найдены в {IMG_SOURCE_DIR}",
+                "hint": "Поместите фото в папку и нажмите снова"}
+
+    # ── 2. Получаем данные из БД ──
+    device = db.query(Device).get(data.device_id)
+    workplace = db.query(Workplace).get(data.workplace_id)
+
+    project_name = "Unknown"
+    if device and device.project_id:
+        project = db.query(Project).get(device.project_id)
+        if project:
+            project_name = project.name or project.code or f"project_{device.project_id}"
+
+    post_folder = "Other"
+    if workplace:
+        post_folder = WORKPLACE_PHOTO_FOLDER.get(workplace.workplace_type, workplace.workplace_type or "Other")
+
+    # ── 3. Подключаемся к шаре ──
+    server_share = f"{IMG_NET_SERVER}\\{IMG_NET_SHARE}"
+    err = _net_connect(server_share, IMG_NET_USER, IMG_NET_PASS)
+    if err not in (0, 1219):  # 0=OK, 1219=уже подключено
+        return {"ok": False,
+                "message": f"❌ Не удалось подключиться к {server_share} (код Windows: {err})",
+                "hint": "Проверьте доступность сервера и учётные данные"}
+
+    # ── 4. Формируем путь назначения ──
+    # Безопасное имя: убираем спец-символы из project_name и sn
+    safe_project = "".join(c for c in project_name if c not in r'\/:*?"<>|').strip()
+    safe_sn      = "".join(c for c in sn          if c not in r'\/:*?"<>|').strip()
+    dest = Path(f"{IMG_NET_SERVER}\\{IMG_NET_SHARE}\\{IMG_NET_BASE}\\{safe_project}\\{post_folder}\\{safe_sn}")
+
+    try:
+        dest.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        return {"ok": False, "message": f"❌ Не удалось создать папку {dest}: {e}"}
+
+    # ── 5. Перемещаем фото (move = copy + delete) ──
+    copied, errors = [], []
+    for img in images:
+        dest_file = dest / img.name
+        if dest_file.exists():
+            ts = datetime.now().strftime('%H%M%S')
+            dest_file = dest / f"{img.stem}_{ts}{img.suffix.lower()}"
+        try:
+            shutil.move(str(img), str(dest_file))
+            copied.append(img.name)
+        except Exception as e:
+            errors.append({"file": img.name, "error": str(e)})
+
+
+    # ── 6. Открываем Explorer ──
+    if copied:
+        try:
+            subprocess.Popen(f'explorer "{dest}"')
+        except Exception:
+            pass
+
+    ok = len(errors) == 0
+    return {
+        "ok":      ok,
+        "copied":  len(copied),
+        "errors":  len(errors),
+        "dest":    str(dest),
+        "files":   copied,
+        "message": (
+            f"✅ Отправлено {len(copied)} фото → {dest}"
+            if ok else
+            f"⚠️ Скопировано {len(copied)}, ошибок: {len(errors)}"
+        ),
+        "error_files": errors,
+    }
