@@ -106,6 +106,23 @@
 .stage-row:hover .btn-rename { opacity:1; }
 .btn-remove-stage { background:none; border:none; cursor:pointer; color:#ef4444; font-size:15px; padding:0 0 0 2px; opacity:0; transition:opacity .15s; flex-shrink:0; }
 .stage-row:hover .btn-remove-stage { opacity:1; }
+
+/* ⭐ Таймер этапа */
+.stage-timer-wrap {
+    display: flex; align-items: center; gap: 4px;
+    flex-shrink: 0;
+}
+.stage-timer-input {
+    width: 70px;
+    padding: 4px 6px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: var(--card-bg);
+    color: var(--text);
+    font-size: 12px;
+    text-align: center;
+}
+.stage-timer-input:focus { border-color: #6366f1; outline: none; }
 </style>
 {% endblock %}
 
@@ -324,6 +341,15 @@ function renderEditor() {
                     <span class="stage-name">${displayLabel}</span>
                     <span class="stage-status">${s.is_enabled ? '&#x25CF; Активен' : '&#x25CB; Пропуск'}</span>
                     ${canEdit && !isDefault ? `
+                    <div class="stage-timer-wrap" title="Таймер этапа (секунды)">
+                        <span style="font-size:11px; color:var(--text-muted);">⏱</span>
+                        <input type="number" class="stage-timer-input"
+                               data-timer-for="${s.stage_key}"
+                               value="${s.timer_seconds ?? 300}" min="1" max="86400"
+                               onchange="updateStageTimer('${s.stage_key}', this.value)">
+                        <span style="font-size:11px; color:var(--text-muted);">с</span>
+                    </div>` : `<span style="font-size:11px; color:var(--text-muted); margin-right:8px;">⏱ ${fmtTimer(s.timer_seconds ?? 300)}</span>`}
+                    ${canEdit && !isDefault ? `
                     <button class="btn-rename" onclick="showRenameModal('${s.stage_key}','global')" title="Переименовать">&#x270F;&#xFE0F;</button>
                     <label class="toggle-switch">
                         <input type="checkbox" ${s.is_enabled ? 'checked' : ''}
@@ -360,6 +386,27 @@ function toggleStage(key, enabled) {
             row.querySelector('.stage-status').textContent = enabled ? '● Активен' : '○ Пропуск';
         }
     }
+}
+
+// Форматирование времени (сек → «1:30» или «5:00» или «1ч 3мин»)
+function fmtTimer(s) {
+    if (!s || s < 60) return s + 'с';
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    if (h > 0) return `${h}ч ${m}мин`;
+    return `${m}:${String(sec).padStart(2,'0')}`;
+}
+
+function updateStageTimer(key, value) {
+    const s = currentConfig.stages.find(x => x.stage_key === key);
+    if (s) s.timer_seconds = Math.max(1, parseInt(value) || 300);
+}
+
+function updatePrStageTimer(key, value) {
+    if (!prCurrent?.stages) return;
+    const s = prCurrent.stages.find(x => x.stage_key === key);
+    if (s) s.timer_seconds = Math.max(1, parseInt(value) || 300);
 }
 
 // addCustomStage / removeCustomStage replaced by showStageAdder / removeStage below
@@ -418,12 +465,12 @@ function initDragDrop() {
 }
 
 async function saveConfig() {
-    // Отправляем order_index + label по позиции в массиве после drag-and-drop
     const stages = currentConfig.stages.map((s, idx) => ({
-        stage_key:   s.stage_key,
-        is_enabled:  s.is_enabled,
-        order_index: idx + 1,
-        label:       (s.label && s.label !== getBaseLabel(s.stage_key)) ? s.label : null,
+        stage_key:     s.stage_key,
+        is_enabled:    s.is_enabled,
+        order_index:   idx + 1,
+        label:         (s.label && s.label !== getBaseLabel(s.stage_key)) ? s.label : null,
+        timer_seconds: s.timer_seconds ?? 300,
     }));
     const res = await fetch(`/api/route-configs/${currentConfig.id}`, {
         method: 'PUT',
@@ -434,7 +481,6 @@ async function saveConfig() {
     if (res.ok) {
         const msg = document.getElementById('savemsg');
         msg.style.display = 'inline';
-        // Обновить конфиг из сервера чтобы order_index был актуальным
         const fresh = await fetch(`/api/route-configs/${currentConfig.id}`);
         if (fresh.ok) currentConfig = await fresh.json();
         setTimeout(() => msg.style.display = 'none', 3000);
@@ -649,6 +695,15 @@ function renderPrEditor(data) {
                     <span class="stage-name">${escapeHTML(displayLabel)}</span>
                     <span class="stage-status">${s.is_enabled ? '&#x25CF; \u0410\u043a\u0442\u0438\u0432\u0435\u043d' : '&#x25CB; \u041f\u0440\u043e\u043f\u0443\u0441\u043a'}</span>
                     ${canEdit ? `
+                    <div class="stage-timer-wrap" title="Таймер этапа (секунды)">
+                        <span style="font-size:11px; color:var(--text-muted);">⏱</span>
+                        <input type="number" class="stage-timer-input"
+                               data-timer-for="${s.stage_key}"
+                               value="${s.timer_seconds ?? 300}" min="1" max="86400"
+                               onchange="updatePrStageTimer('${s.stage_key}', this.value)">
+                        <span style="font-size:11px; color:var(--text-muted);">с</span>
+                    </div>` : `<span style="font-size:11px; color:var(--text-muted); margin-right:8px;">⏱ ${fmtTimer(s.timer_seconds ?? 300)}</span>`}
+                    ${canEdit ? `
                     <button class="btn-rename" onclick="showRenameModal('${s.stage_key}','project')" title="\u041f\u0435\u0440\u0435\u0438\u043c\u0435\u043d\u043e\u0432\u0430\u0442\u044c">&#x270F;&#xFE0F;</button>
                     <label class="toggle-switch">
                         <input type="checkbox" ${s.is_enabled ? 'checked' : ''}
@@ -701,10 +756,11 @@ function prToggleStage(key, enabled) {
 async function savePrRoute() {
     if (!prCurrent) return;
     const stages = (prCurrent.stages || []).map((s, idx) => ({
-        stage_key:   s.stage_key,
-        is_enabled:  s.is_enabled,
-        order_index: idx + 1,
-        label:       (s.label && s.label !== getBaseLabel(s.stage_key)) ? s.label : null,
+        stage_key:     s.stage_key,
+        is_enabled:    s.is_enabled,
+        order_index:   idx + 1,
+        label:         (s.label && s.label !== getBaseLabel(s.stage_key)) ? s.label : null,
+        timer_seconds: s.timer_seconds ?? 300,
     }));
     const resp = await fetch(`/api/project-routes/${prCurrent.projectId}/device/${prCurrent.deviceType}`, {
         method: 'PUT',
@@ -883,7 +939,7 @@ function addStageFromPicker(key) {
     // Auto-label: "Функц. контроль", "Функц. контроль-2", ...
     const newLabel = existingCount === 0 ? ps.label : `${ps.label}-${existingCount + 1}`;
 
-    const stage = { stage_key: newKey, is_enabled: true, order_index: 999, label: newLabel, is_custom: false };
+    const stage = { stage_key: newKey, is_enabled: true, order_index: 999, label: newLabel, is_custom: false, timer_seconds: 300 };
 
     if (_stageAdderCtx === 'global') {
         currentConfig.stages.push(stage);
