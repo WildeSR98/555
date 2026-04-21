@@ -19,7 +19,7 @@
     <div id="stepLogin" class="card glass-card animate-fade-in">
         <h3 style="margin-bottom: 4px; font-weight: 700;">Шаг 1: Выбор рабочего места</h3>
         <p class="text-muted" style="margin-bottom: 20px; font-size: 14px;">👤 Вы вошли как: <strong>{{ user.full_name }}</strong> &nbsp;·&nbsp; Нажмите на рабочее место для начала смены</p>
-        <div id="wpGrid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(160px, 1fr)); gap:12px;">
+        <div id="wpGrid" style="display:grid; grid-template-columns:repeat(3, 1fr); gap:12px;">
             <div class="text-muted" style="font-size:13px; grid-column:1/-1;">⏳ Загрузка рабочих мест...</div>
         </div>
     </div>
@@ -79,9 +79,24 @@
 
                 <!-- Фаза 2: Действия после приёма -->
                 <div id="phaseAction" style="display:none; flex-direction:column; gap:10px;">
-                    <button class="btn btn-success" style="font-weight:bold; padding:15px;" onclick="handleComplete()">✅ Готово</button>
-                    <button class="btn btn-danger" style="font-weight:bold; padding:15px;" onclick="openCommentModal('defect')">⚠️ Брак</button>
-                    <button class="btn btn-secondary" onclick="doAction('semifinished')">🔧 Отпр. в Полуфабрикат</button>
+                    <!-- Таймер этапа -->
+                    <div id="stageTimerBox" style="display:none; text-align:center; padding:12px 0 4px;">
+                        <div style="position:relative; width:72px; height:72px; margin:0 auto 6px;">
+                            <svg width="72" height="72" style="transform:rotate(-90deg);">
+                                <circle cx="36" cy="36" r="30" fill="none" stroke="var(--border)" stroke-width="5"/>
+                                <circle id="timerRing" cx="36" cy="36" r="30" fill="none"
+                                        stroke="#6366f1" stroke-width="5"
+                                        stroke-dasharray="188.5" stroke-dashoffset="0"
+                                        style="transition:stroke-dashoffset .9s linear, stroke .3s;"/>
+                            </svg>
+                            <div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+                                        font-size:16px; font-weight:800;" id="timerLabel">5:00</div>
+                        </div>
+                        <div id="timerHint" style="font-size:11px; color:var(--text-muted);">ожидайте...</div>
+                    </div>
+                    <button id="btnComplete" class="btn btn-success" style="font-weight:bold; padding:15px;" onclick="handleComplete()">✅ Готово</button>
+                    <button id="btnDefect" class="btn btn-danger" style="font-weight:bold; padding:15px;" onclick="openCommentModal('defect')">⚠️ Брак</button>
+                    <button id="btnSemifinished" class="btn btn-secondary" onclick="doAction('semifinished')">🔧 Отпр. в Полуфабрикат</button>
                 </div>
             </div>
 
@@ -164,24 +179,39 @@ let state = {
     workplaceId: null,
     workplaceType: null,
     batchLimit: 1,
+    stageTimerSeconds: 300,  // таймер этапа (из маршрутного листа)
     devices: [],          // {id, sn, name, status, needScanIn}
     phase: 'accept',      // 'accept' — нужно принять в работу, 'action' — можно закрывать
     verifiedProjectIds: [],
     pendingScan: null,
     pendingProjectData: null,
-    // Для модалки комментария:
     pendingCommentAction: null,
     pendingCommentRequired: false,
-    // Для сохранения сессии после обновления страницы:
     workerName: '',
     workplaceName: '',
     lastFeedback: null,
 };
 
-// Флаг: авто-переход после «Принять в работу»
-// true  = устройство остаётся в буфере, сразу появляются кнопки Готово/Брак
-// false = буфер очищается, нужно повторно отсканировать SN (текущее поведение)
-const AUTO_ADVANCE_AFTER_SCAN_IN = false;
+// Посты где после «Принять в работу» устройство ОСТАЁТСЯ в буфере
+// и сразу доступны кнопки Готово / Брак (без повторного сканирования)
+const AUTO_ADVANCE_TYPES = new Set([
+    'PRE_PRODUCTION',     // комплектовка
+    'ASSEMBLY',           // сборка
+    'VIBROSTAND',         // вибро
+    'TECH_CONTROL_1_1',   // отк 1.1
+    'TECH_CONTROL_1_2',   // отк 1.2
+    'TECH_CONTROL_2_1',   // отк 2.1
+    'TECH_CONTROL_2_2',   // отк 2.2
+    'PACKING',            // упаковка
+    'ACCOUNTING',         // учёт
+    'WAREHOUSE',          // склад
+    'REPAIR',             // ремонт
+    // FUNC_CONTROL — буфер очищается, нужно повторно сканировать
+]);
+
+function shouldAutoAdvance() {
+    return AUTO_ADVANCE_TYPES.has(state.workplaceType);
+}
 
 const SCAN_STATE_KEY = 'scan_session_state';
 
@@ -322,6 +352,25 @@ async function loadWorkplaces() {
             grid.innerHTML = '<div class="text-muted" style="grid-column:1/-1;">Нет доступных рабочих мест</div>';
             return;
         }
+        const TYPE_ORDER = [
+            'PRE_PRODUCTION',
+            'ASSEMBLY',
+            'VIBROSTAND',
+            'REPAIR',
+            'TECH_CONTROL_1_1',
+            'TECH_CONTROL_1_2',
+            'FUNC_CONTROL',
+            'TECH_CONTROL_2_1',
+            'TECH_CONTROL_2_2',
+            'PACKING',
+            'ACCOUNTING',
+            'WAREHOUSE',
+        ];
+        workplaces.sort((a, b) => {
+            const ai = TYPE_ORDER.indexOf(a.workplace_type);
+            const bi = TYPE_ORDER.indexOf(b.workplace_type);
+            return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+        });
         grid.innerHTML = workplaces.map(wp => {
             const icon  = ICONS[wp.workplace_type]  || '🖥';
             const color = COLORS[wp.workplace_type] || '#6366f1';
@@ -352,13 +401,14 @@ async function selectWorkplace(wpId) {
         });
         const res = await resp.json();
         if (resp.ok) {
-            state.sessionId      = res.session_id;
-            state.workerId       = res.worker_id;
-            state.workplaceId    = parseInt(wpId);
-            state.workplaceType  = res.workplace_type;
-            state.batchLimit     = res.batch_limit;
-            state.workerName     = res.worker_name;
-            state.workplaceName  = res.workplace_name;
+            state.sessionId           = res.session_id;
+            state.workerId            = res.worker_id;
+            state.workplaceId         = parseInt(wpId);
+            state.workplaceType       = res.workplace_type;
+            state.batchLimit          = res.batch_limit;
+            state.stageTimerSeconds   = res.stage_timer_seconds || 300;
+            state.workerName          = res.worker_name;
+            state.workplaceName       = res.workplace_name;
             
             document.getElementById('lblWorker').textContent = res.worker_name;
             document.getElementById('lblWorkplace').textContent = res.workplace_name;
@@ -538,6 +588,43 @@ function showFeedback(type, text, skipSave = false) {
     }
 }
 
+// Перевод статусов устройств для отображения
+const STATUS_RU = {
+    'WAITING_KITTING':          'Ожидание комплектовки',
+    'PRE_PRODUCTION':           'Комплектовка',
+    'WAITING_ASSEMBLY':         'Ожидание сборки',
+    'ASSEMBLY':                 'Сборка',
+    'WAITING_VIBROSTAND':       'Ожидание вибростенда',
+    'VIBROSTAND':               'Вибростенд',
+    'WAITING_TECH_CONTROL_1_1': 'Ожидание ОТК 1.1',
+    'TECH_CONTROL_1_1':         'ОТК 1.1',
+    'WAITING_TECH_CONTROL_1_2': 'Ожидание ОТК 1.2',
+    'TECH_CONTROL_1_2':         'ОТК 1.2',
+    'WAITING_FUNC_CONTROL':     'Ожидание функц. контроля',
+    'FUNC_CONTROL':             'Функц. контроль',
+    'WAITING_TECH_CONTROL_2_1': 'Ожидание ОТК 2.1',
+    'TECH_CONTROL_2_1':         'ОТК 2.1',
+    'WAITING_TECH_CONTROL_2_2': 'Ожидание ОТК 2.2',
+    'TECH_CONTROL_2_2':         'ОТК 2.2',
+    'WAITING_PACKING':          'Ожидание упаковки',
+    'PACKING':                  'Упаковка',
+    'WAITING_ACCOUNTING':       'Ожидание учёта',
+    'ACCOUNTING':               'Учёт',
+    'WAITING_WAREHOUSE':        'Ожидание склада',
+    'WAREHOUSE':                'Склад',
+    'QC_PASSED':                'Завершено',
+    'DEFECT':                   'Брак',
+    'REPAIR':                   'Ремонт',
+};
+
+// Цвет бейджа по статусу
+function statusBadgeStyle(status) {
+    if (status === 'DEFECT')     return 'background:#ef4444; color:#fff;';
+    if (status === 'QC_PASSED')  return 'background:#22c55e; color:#fff;';
+    if (status.startsWith('WAITING_')) return 'background:#f59e0b; color:#fff;';
+    return 'background:#6366f1; color:#fff;';  // в работе
+}
+
 function renderDevices() {
     const tbody = document.getElementById('devicesBody');
     document.getElementById('lblBuffer').textContent = state.devices.length;
@@ -545,6 +632,7 @@ function renderDevices() {
     if (state.devices.length === 0) {
         tbody.innerHTML = '<tr id="emptyRow"><td colspan="3" class="text-center text-muted">Нет устройств в буфере</td></tr>';
         updateSelectedCount();
+        hideStageTimer();  // ← скрываем таймер когда буфер пуст
         saveState();
         return;
     }
@@ -553,12 +641,13 @@ function renderDevices() {
         <tr>
             <td><input type="checkbox" class="device-check" value="${d.id}" checked onchange="updateSelectedCount()"></td>
             <td class="sn-item">${escapeHTML(d.sn)}</td>
-            <td><span class="badge">${escapeHTML(d.status)}</span></td>
+            <td><span class="badge" style="${statusBadgeStyle(d.status)}">${escapeHTML(STATUS_RU[d.status] || d.status)}</span></td>
         </tr>
     `).join('');
     updateSelectedCount();
     saveState();
 }
+
 
 function toggleAll() {
     const chk = document.getElementById('selectAll').checked;
@@ -707,9 +796,7 @@ async function doAction(actionName, notes = '', targetStatus = null) {
             const res = await resp.json();
 
             if (actionName === 'scan_in') {
-                if (AUTO_ADVANCE_AFTER_SCAN_IN) {
-                    // Авто-переход: оставляем в буфере, обновляем статусы,
-                    // сразу показываем кнопки Действие (Готово / Брак) — без повторного скана
+                if (shouldAutoAdvance()) {
                     const statusMap = {};
                     (res.results || []).forEach(r => { statusMap[r.device_id] = r.new_status; });
                     state.devices = state.devices.map(d => ({
@@ -719,8 +806,12 @@ async function doAction(actionName, notes = '', targetStatus = null) {
                     }));
                     state.phase = 'action';
                     showFeedback('success', '📥 Принято в работу. Нажмите «Готово» для завершения.');
+                    // Если сервер вернул timer из проектного маршрута — обновляем state
+                    if (res.stage_timer_seconds) {
+                        state.stageTimerSeconds = res.stage_timer_seconds;
+                    }
+                    startStageTimer(state.stageTimerSeconds); // ⬅ запуск таймера
                 } else {
-                    // Текущее поведение: буфер очищается, повторное сканирование
                     state.devices = [];
                     showFeedback('success', res.message + ' Отсканируйте SN снова для завершения.');
                 }
@@ -728,6 +819,7 @@ async function doAction(actionName, notes = '', targetStatus = null) {
                 // После action (complete/defect/semifinished) — удаляем из буфера
                 state.devices = state.devices.filter(d => !selectedIds.includes(d.id));
                 showFeedback('success', res.message);
+                stopStageTimer();  // ⬅ останавливаем таймер
             }
 
             renderDevices();
@@ -782,6 +874,104 @@ function verifySpecCode() {
         document.getElementById('specCodeInput').focus();
     }
 }
+
+// ─── Stage Timer ───────────────────────────────────────────
+let _timerInterval = null;
+let _timerTotal    = 300;
+let _timerLeft     = 0;
+const TIMER_CIRCUMFERENCE = 2 * Math.PI * 30; // r=30 → 188.5
+
+// --- Блокировка / разблокировка кнопок действия ---
+const ACTION_BTN_IDS = ['btnComplete', 'btnDefect', 'btnSemifinished'];
+
+function lockActionButtons() {
+    ACTION_BTN_IDS.forEach(id => {
+        const btn = document.getElementById(id);
+        if (!btn) return;
+        btn.disabled = true;
+        btn.style.opacity = '0.4';
+        btn.style.cursor = 'not-allowed';
+        btn.style.animation = '';  // сбрасываем pulse
+        btn.title = 'Ожидайте окончания таймера';
+    });
+}
+
+function unlockActionButtons() {
+    ACTION_BTN_IDS.forEach(id => {
+        const btn = document.getElementById(id);
+        if (!btn) return;
+        btn.disabled = false;
+        btn.style.opacity = '';
+        btn.style.cursor = '';
+        btn.title = '';
+    });
+}
+
+function startStageTimer(seconds) {
+    stopStageTimer();
+    _timerTotal = seconds;
+    _timerLeft  = seconds;
+    _updateTimerDisplay();
+    document.getElementById('stageTimerBox').style.display = 'block';
+    const hint = document.getElementById('timerHint');
+    if (hint) hint.textContent = 'ожидайте...';
+    lockActionButtons();  // ← блокируем на время таймера
+    _timerInterval = setInterval(() => {
+        _timerLeft--;
+        _updateTimerDisplay();
+        if (_timerLeft <= 0) stopStageTimer(true);
+    }, 1000);
+}
+
+function stopStageTimer(done = false) {
+    clearInterval(_timerInterval);
+    _timerInterval = null;
+    if (done) {
+        // Таймер дошёл до 0 — разблокируем и запускаем pulse на кнопке
+        unlockActionButtons();
+        const hint = document.getElementById('timerHint');
+        if (hint) hint.textContent = 'можно завершать';
+        const btn = document.getElementById('btnComplete');
+        if (btn) btn.style.animation = 'pulse 0.8s infinite';
+    }
+    // done=false: остановка по complete/defect — остаёмся виден (сменяется при следующем scan_in)
+}
+
+function hideStageTimer() {
+    const box = document.getElementById('stageTimerBox');
+    if (box) box.style.display = 'none';
+    unlockActionButtons();  // ← разблокируем при скрытии таймера
+}
+
+function _updateTimerDisplay() {
+    const label = document.getElementById('timerLabel');
+    const ring  = document.getElementById('timerRing');
+    const btn   = document.getElementById('btnComplete');
+    if (!label || !ring) return;
+
+    const left = Math.max(0, _timerLeft);
+    const pct  = _timerTotal > 0 ? 1 - left / _timerTotal : 1;
+    const offset = TIMER_CIRCUMFERENCE * (1 - pct);
+
+    const m = Math.floor(left / 60);
+    const s = left % 60;
+    label.textContent = `${m}:${String(s).padStart(2,'0')}`;
+    ring.style.strokeDashoffset = offset;
+
+    if (left <= 0) {
+        // Таймер истёк — зелёное кольцо
+        ring.style.stroke = '#22c55e';
+        label.style.color = '#22c55e';
+        // pulse добавляется в stopStageTimer(true) после разблокировки кнопок
+    } else if (left <= 30) {
+        ring.style.stroke = '#f59e0b'; // жёлтый — мало времени
+        label.style.color = '#f59e0b';
+    } else {
+        ring.style.stroke = '#6366f1';
+        label.style.color = '';
+    }
+}
+
 </script>
 
 <style>
@@ -826,14 +1016,11 @@ function verifySpecCode() {
 .wp-tile-name {
     font-weight: 700;
     font-size: 13px;
-    color: var(--text, #f1f5f9);
+    color: var(--tile-color);
     line-height: 1.2;
 }
 .wp-tile-type {
-    font-size: 11px;
-    color: var(--tile-color);
-    font-weight: 600;
-    letter-spacing: .3px;
+    display: none;
 }
 /* ─────────────────────────────────────────────────────── */
 </style>

@@ -40,14 +40,15 @@ def _serialize(rc: RouteConfig) -> dict:
         "created_at":  rc.created_at.strftime('%d.%m.%Y') if rc.created_at else None,
         "stages": [
             {
-                "stage_key":   s.stage_key,
-                "order_index": s.order_index,
-                "is_enabled":  s.is_enabled,
-                "label":       s.label or next(
+                "stage_key":    s.stage_key,
+                "order_index":  s.order_index,
+                "is_enabled":   s.is_enabled,
+                "timer_seconds": s.timer_seconds if s.timer_seconds is not None else 300,
+                "label":        s.label or next(
                     (lbl for k, lbl, _ in ROUTE_PIPELINE_STAGES if k == s.stage_key),
                     s.stage_key[8:] if s.stage_key.startswith('CUSTOM::') else s.stage_key
                 ),
-                "is_custom":   s.stage_key.startswith('CUSTOM::'),
+                "is_custom":    s.stage_key.startswith('CUSTOM::'),
             }
             for s in rc.stages
         ],
@@ -60,8 +61,9 @@ def _serialize(rc: RouteConfig) -> dict:
 class StageInput(BaseModel):
     stage_key: str
     is_enabled: bool
-    order_index: Optional[int] = None  # позиция после drag-and-drop
-    label: Optional[str] = None        # кастомный ярлык (напр. «Комплектовка-доукомплектование»)
+    order_index: Optional[int] = None
+    label: Optional[str] = None
+    timer_seconds: Optional[int] = 300   # таймер этапа в секундах (мин 1)
 
 
 class RouteConfigCreate(BaseModel):
@@ -128,6 +130,7 @@ def create_route_config(
             stage_key=s.stage_key,
             order_index=idx,
             is_enabled=s.is_enabled,
+            timer_seconds=max(1, s.timer_seconds or 300),
         ))
 
     db.commit()
@@ -188,6 +191,7 @@ async def update_route_config(
                 order_index=order_idx,
                 is_enabled=s.is_enabled,
                 label=s.label or None,
+                timer_seconds=max(1, s.timer_seconds or 300),
             ))
 
     db.commit()

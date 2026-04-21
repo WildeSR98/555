@@ -140,6 +140,18 @@ def start_session(
         db.commit()
         db.refresh(session_obj)
 
+    # Найти таймер для этапа из глобального маршрутного листа (workplace_type == stage_key)
+    from src.models import RouteConfig as _RC, RouteConfigStage as _RCS
+    stage_timer = 300
+    stage_key = workplace.workplace_type  # напр. TECH_CONTROL_2_1
+    rc = db.query(_RC).filter_by(device_type=stage_key).first() \
+        or db.query(_RC).filter_by(is_default=True).first()
+    if rc:
+        for st in rc.stages:
+            if st.stage_key == stage_key and st.is_enabled:
+                stage_timer = st.timer_seconds if st.timer_seconds else 300
+                break
+
     return {
         "ok": True,
         "session_id": session_obj.id,
@@ -148,6 +160,7 @@ def start_session(
         "workplace_name": workplace.name,
         "workplace_type": workplace.workplace_type,
         "batch_limit": WorkflowEngine.get_batch_limit(workplace.workplace_type),
+        "stage_timer_seconds": stage_timer,
     }
 
 
@@ -365,7 +378,13 @@ async def do_action(
                     created_at=datetime.now(),
                 )
                 db.add(log)
-            results.append({"sn": device.serial_number, "action": action_type, "device_id": device.id, "new_status": device.status, "old_status": old_status})
+            results.append({
+                "sn": device.serial_number,
+                "action": action_type,
+                "device_id": device.id,
+                "new_status": device.status,
+                "old_status": old_status,
+            })
 
         db.commit()
 
@@ -389,18 +408,57 @@ async def do_action(
                     "timestamp":          datetime.now().strftime('%d.%m.%Y %H:%M'),
                 })
 
+        # Для scan_in: определяем таймер из ProjectRouteStage или глобального маршрута
+        stage_timer_seconds = None
+        if data.action == 'scan_in' and results:
+            # Берём первое устройство из результатов (device_id)
+            first_dev = db.query(Device).filter(Device.id == results[0]['device_id']).first()
+            if first_dev:
+                workplace = db.query(Workplace).get(data.workplace_id)
+                stage_key = workplace.workplace_type if workplace else None
+                timer_val = 300
+                # 1. Сначала ищем в ProjectRouteStage проекта
+                if first_dev.project_id and stage_key:
+                    pr_stage = (
+                        db.query(ProjectRouteStage)
+                        .filter_by(
+                            project_id=first_dev.project_id,
+                            device_type=first_dev.device_type,
+                        )
+                        .filter(ProjectRouteStage.stage_key == stage_key, ProjectRouteStage.is_enabled == True)
+                        .first()
+                    )
+                    if pr_stage and pr_stage.timer_seconds:
+                        timer_val = pr_stage.timer_seconds
+                    else:
+                        # 2. Фолбек на глобальный RouteConfig
+                        rc = (
+                            db.query(RouteConfig)
+                            .filter_by(device_type=first_dev.device_type).first()
+                            or db.query(RouteConfig).filter_by(is_default=True).first()
+                        )
+                        if rc:
+                            for st in rc.stages:
+                                if st.stage_key == stage_key and st.is_enabled:
+                                    timer_val = st.timer_seconds if st.timer_seconds else 300
+                                    break
+                stage_timer_seconds = timer_val
+
         ACTION_DISPLAYS = {
-            'COMPLETED': '✅ Готово',
-            'DEFECT': '⚠️ Брак',
-            'KEPT': '📌 Оставлено',
+            'COMPLETED':         '✅ Готово',
+            'DEFECT':            '⚠️ Брак',
+            'KEPT':              '📌 Оставлено',
             'MAKE_SEMIFINISHED': '🔧 Полуфабрикат',
-            'SCAN_IN': '📥 Принят'
+            'SCAN_IN':           '📥 Принят',
         }
 
         return {
             "ok": True,
             "message": f'{ACTION_DISPLAYS.get(action_type, data.action)} — {len(results)} устр.',
             "results": results,
+            **({
+                "stage_timer_seconds": stage_timer_seconds
+            } if stage_timer_seconds is not None else {}),
         }
 
     except Exception as e:

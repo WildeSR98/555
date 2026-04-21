@@ -186,11 +186,12 @@ def _get_global_stages(device_type: str, db: Session) -> list:
         return []
     return [
         {
-            "stage_key":   s.stage_key,
-            "label":       _resolve_label(s.stage_key),
-            "order_index": s.order_index,
-            "is_enabled":  s.is_enabled,
-            "is_custom":   s.stage_key.startswith('CUSTOM::'),
+            "stage_key":      s.stage_key,
+            "label":          _resolve_label(s.stage_key),
+            "order_index":    s.order_index,
+            "is_enabled":     s.is_enabled,
+            "timer_seconds":  s.timer_seconds if s.timer_seconds is not None else 300,
+            "is_custom":      s.stage_key.startswith('CUSTOM::'),
         }
         for s in rc.stages
     ]
@@ -210,11 +211,12 @@ def _get_project_stages(project_id: int, device_type: str, db: Session) -> tuple
     if overrides:
         return ([
             {
-                "stage_key":   s.stage_key,
-                "label":       _resolve_label(s.stage_key, s.label),
-                "order_index": s.order_index,
-                "is_enabled":  s.is_enabled,
-                "is_custom":   s.stage_key.startswith('CUSTOM::'),
+                "stage_key":     s.stage_key,
+                "label":         _resolve_label(s.stage_key, s.label),
+                "order_index":   s.order_index,
+                "is_enabled":    s.is_enabled,
+                "timer_seconds": s.timer_seconds if s.timer_seconds is not None else 300,
+                "is_custom":     s.stage_key.startswith('CUSTOM::'),
             }
             for s in overrides
         ], True)
@@ -225,10 +227,11 @@ def _get_project_stages(project_id: int, device_type: str, db: Session) -> tuple
 # ──────────────────────── Schemas ────────────────────────
 
 class StageOverrideItem(BaseModel):
-    stage_key:   str
-    is_enabled:  bool
-    order_index: int
-    label:       Optional[str] = None
+    stage_key:    str
+    is_enabled:   bool
+    order_index:  int
+    label:        Optional[str] = None
+    timer_seconds: Optional[int] = 300   # таймер этапа в секундах (мин 1)
 
 
 class SaveProjectRouteBody(BaseModel):
@@ -334,7 +337,8 @@ async def save_project_device_route(
             stage_key=s.stage_key,
             order_index=s.order_index,
             is_enabled=s.is_enabled,
-            label=s.label or None,  # save for any stage (renames, ::N auto-labels)
+            label=s.label or None,
+            timer_seconds=max(1, s.timer_seconds or 300),
         ))
 
     # Автоматически переводим устройства, ожидающие удалённые этапы, записываем в историю

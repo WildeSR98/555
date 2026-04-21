@@ -19,7 +19,7 @@ else:
     BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Загрузка .env
-load_dotenv(BASE_DIR / '.env')
+load_dotenv(BASE_DIR / '.env', override=True)
 
 
 @dataclass
