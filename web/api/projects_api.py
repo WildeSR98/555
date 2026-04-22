@@ -334,26 +334,33 @@ async def create_project(
             db.commit()
 
         # ── Создать структуру папок на сетевом диске ─────────────────────────
+        import logging as _netlog
+        _netlog = _netlog.getLogger(__name__)
         folder_result: dict = {'ok': False, 'created': 0, 'error': 'not attempted'}
         try:
-            from scripts.create_project_folders import create_project_folders
+            import importlib.util as _ilu
+            from pathlib import Path as _Path
+            _script = _Path(__file__).resolve().parent.parent.parent / 'scripts' / 'create_project_folders.py'
+            _spec = _ilu.spec_from_file_location('create_project_folders', _script)
+            _mod  = _ilu.module_from_spec(_spec)
+            _spec.loader.exec_module(_mod)
+
             net_devices = [
                 {'part_number': d.part_number, 'serial_number': d.serial_number}
                 for d in new_proj.devices
             ]
-            folder_result = create_project_folders(
+            folder_result = _mod.create_project_folders(
                 project_name=new_proj.name,
                 devices=net_devices,
             )
-            if not folder_result['ok']:
-                import logging as _log
-                _log.getLogger(__name__).warning(
-                    f'[NET] Папки не созданы: {folder_result.get("error")}'
-                )
+            if folder_result['ok']:
+                _netlog.info(f'[NET] Папки созданы: {folder_result["created"]} шт. → {folder_result["path"]}')
+            else:
+                _netlog.warning(f'[NET] Папки не созданы: {folder_result.get("error")}')
         except Exception as _e:
-            import logging as _log
-            _log.getLogger(__name__).warning(f'[NET] Ошибка при создании папок: {_e}')
+            _netlog.warning(f'[NET] Ошибка при создании папок: {_e}', exc_info=True)
         # ── (ошибка сети не блокирует создание проекта) ───────────────────────
+
 
         await ws_manager.broadcast({
             "type":        "project_created",
