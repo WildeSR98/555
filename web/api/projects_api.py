@@ -333,6 +333,28 @@ async def create_project(
             ))
             db.commit()
 
+        # ── Создать структуру папок на сетевом диске ─────────────────────────
+        folder_result: dict = {'ok': False, 'created': 0, 'error': 'not attempted'}
+        try:
+            from scripts.create_project_folders import create_project_folders
+            net_devices = [
+                {'part_number': d.part_number, 'serial_number': d.serial_number}
+                for d in new_proj.devices
+            ]
+            folder_result = create_project_folders(
+                project_name=new_proj.name,
+                devices=net_devices,
+            )
+            if not folder_result['ok']:
+                import logging as _log
+                _log.getLogger(__name__).warning(
+                    f'[NET] Папки не созданы: {folder_result.get("error")}'
+                )
+        except Exception as _e:
+            import logging as _log
+            _log.getLogger(__name__).warning(f'[NET] Ошибка при создании папок: {_e}')
+        # ── (ошибка сети не блокирует создание проекта) ───────────────────────
+
         await ws_manager.broadcast({
             "type":        "project_created",
             "id":          new_proj.id,
@@ -341,7 +363,17 @@ async def create_project(
             "device_count": device_count,
         })
 
-        return {"ok": True, "message": f"Проект создан. Сгенерировано устройств: {device_count}"}
+        net_msg = (
+            f"Папки на сетевом диске созданы ({folder_result.get('created', 0)} шт.)"
+            if folder_result.get('ok')
+            else "Папки на сетевом диске не созданы (проверьте подключение)"
+        )
+        return {
+            "ok": True,
+            "message": f"Проект создан. Сгенерировано устройств: {device_count}",
+            "net_folders": folder_result,
+            "net_message": net_msg,
+        }
         
     except Exception as e:
         db.rollback()
