@@ -178,3 +178,137 @@ def update_settings(
     set_config(db, 'cooldown_bypass_roles', cool_roles)
 
     return {"ok": True, "message": "Настройки сохранены"}
+
+
+# =============================================
+# Загрузка изображений на сетевой диск
+# =============================================
+
+from fastapi import UploadFile, File, Form
+from typing import List as TList
+import shutil, os
+from pathlib import Path
+
+IMG_TARGET_DIR = Path(os.getenv('IMG_TARGET_DIR', r'\\server\share\photos'))
+IMG_EXTENSIONS = {f".{e.strip().lower()}" for e in os.getenv('IMG_EXTENSIONS', 'jpg,jpeg,png,bmp,gif,webp,tiff,tif').split(',')}
+
+
+@router.post("/upload-images")
+async def upload_images(
+    files: TList[UploadFile] = File(...),
+    subdir: str = Form(default=''),
+    open_explorer: str = Form(default='false'),   # 'true' → открыть Explorer
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Загрузить изображения с браузера на сетевой диск (IMG_TARGET_DIR/{subdir}/).
+    Доступно для всех авторизованных пользователей.
+    subdir — подпапка внутри target (обычно SN устройства).
+    open_explorer — открыть папку в Windows Explorer после загрузки.
+    """
+    dest = IMG_TARGET_DIR / subdir.strip() if subdir.strip() else IMG_TARGET_DIR
+
+    try:
+        dest.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        raise HTTPException(500, f"Не удалось создать папку {dest}: {e}")
+
+    results = []
+    for upload in files:
+        suffix = Path(upload.filename).suffix.lower()
+        if suffix not in IMG_EXTENSIONS:
+            results.append({"file": upload.filename, "ok": False, "error": "Недопустимый формат"})
+            continue
+
+        dest_file = dest / upload.filename
+        # Если файл существует — добавляем метку времени
+        if dest_file.exists():
+            stem = Path(upload.filename).stem
+            ts = datetime.now().strftime('%H%M%S')
+            dest_file = dest / f"{stem}_{ts}{suffix}"
+
+        try:
+            with dest_file.open('wb') as f:
+                shutil.copyfileobj(upload.file, f)
+            results.append({"file": upload.filename, "ok": True, "saved_as": dest_file.name})
+        except Exception as e:
+            results.append({"file": upload.filename, "ok": False, "error": str(e)})
+        finally:
+            await upload.close()
+
+    ok_count  = sum(1 for r in results if r['ok'])
+    err_count = len(results) - ok_count
+
+    # Открываем папку в Explorer (работает если сервер локальный)
+    if open_explorer.lower() in ('true', '1') and ok_count > 0:
+        try:
+            import subprocess as _sp
+            _sp.Popen(f'explorer "{dest}"')
+        except Exception:
+            pass  # не критично если не открылось
+
+    return {
+        "ok":      err_count == 0,
+        "copied":  ok_count,
+        "errors":  err_count,
+        "message": f"Загружено: {ok_count}, ошибок: {err_count}",
+        "target":  str(dest),
+        "results": results,
+    }
+
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+
+@router.get('/logs')
+def get_logs(
+    level: str = 'ERROR',       # ERROR | WARNING | ALL
+    limit: int = 200,
+    user: User = Depends(get_current_user),
+):
+    """Читает последние N строк лог-файла, фильтруя по уровню."""
+    from pathlib import Path as _Path
+    import re as _re
+
+    if user.role not in ('ADMIN', 'ROOT'):
+        raise HTTPException(403, 'Недостаточно прав')
+
+    log_file = _Path(__file__).resolve().parent.parent.parent / 'logs' / 'production_manager.log'
+    if not log_file.exists():
+        return {'ok': True, 'entries': [], 'total': 0}
+
+    level_upper = level.upper()
+    allowed_levels = {'ERROR', 'WARNING', 'CRITICAL', 'ALL'}
+    if level_upper not in allowed_levels:
+        level_upper = 'ERROR'
+
+    pattern = _re.compile(
+        r'^(?P<dt>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s*\|\s*(?P<level>\w+)\s*\|\s*(?P<logger>\S+)\s*\|\s*(?P<msg>.+)$'
+    )
+
+    entries = []
+    try:
+        with open(log_file, encoding='utf-8', errors='replace') as f:
+            lines = f.readlines()
+    except Exception as e:
+        raise HTTPException(500, f'Ошибка чтения лога: {e}')
+
+    for line in reversed(lines):
+        line = line.strip()
+        if not line:
+            continue
+        m = pattern.match(line)
+        if not m:
+            continue
+        lvl = m.group('level').upper()
+        if level_upper != 'ALL' and lvl != level_upper:
+            continue
+        entries.append({
+            'dt':     m.group('dt'),
+            'level':  lvl,
+            'logger': m.group('logger'),
+            'msg':    m.group('msg'),
+        })
+        if len(entries) >= limit:
+            break
+
+    return {'ok': True, 'entries': entries, 'total': len(entries), 'log_file': str(log_file)}
