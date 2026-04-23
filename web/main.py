@@ -170,7 +170,7 @@ app.include_router(archive_router.router, prefix="", tags=["Pages"])
 # =============================================
 
 from web.api import dashboard_api, analytics_api, projects_api, pipeline_api, devices_api, sn_pool_api, admin_api, scan_api, health_api
-from web.api import route_config_api, archive_api, ws_api, project_routes_api
+from web.api import route_config_api, archive_api, ws_api, project_routes_api, mac_pool_api
 
 app.include_router(dashboard_api.router,    prefix="/api/dashboard",      tags=["API Dashboard"],  dependencies=[Depends(get_current_user)])
 app.include_router(health_api.router,       prefix="/api/health",          tags=["System Health"])
@@ -179,6 +179,7 @@ app.include_router(projects_api.router,     prefix="/api/projects",        tags=
 app.include_router(pipeline_api.router,     prefix="/api/pipeline",        tags=["API Pipeline"],   dependencies=[Depends(get_current_user)])
 app.include_router(devices_api.router,      prefix="/api/devices",         tags=["API Devices"],    dependencies=[Depends(get_current_user)])
 app.include_router(sn_pool_api.router,      prefix="/api/sn-pool",         tags=["API SN Pool"],    dependencies=[Depends(get_current_user)])
+app.include_router(mac_pool_api.router,     prefix="/api/mac-pool",        tags=["API MAC Pool"],   dependencies=[Depends(get_current_user)])
 app.include_router(admin_api.router,        prefix="/api/admin",           tags=["API Admin"],      dependencies=[Depends(require_admin)])
 app.include_router(scan_api.router,         prefix="/api/scan",            tags=["API Scan"],       dependencies=[Depends(get_current_user)])
 app.include_router(route_config_api.router,   prefix="/api/route-configs",   tags=["API Routes"],        dependencies=[Depends(get_current_user)])

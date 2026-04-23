@@ -118,6 +118,80 @@ def create_project_folders(project_name: str, devices: list) -> dict:
     return result
 
 
+def create_project_excel(project_name: str, devices: list) -> dict:
+    """
+    Создаёт Excel-файл {project_name}_mac_sn.xlsx в корне проекта на сетевом диске.
+
+    Args:
+        project_name: имя проекта
+        devices: список словарей {part_number, serial_number, mac1, mac2, category}
+
+    Returns:
+        {'ok': bool, 'path': str, 'error': str | None}
+    """
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    except ImportError:
+        return {'ok': False, 'path': '', 'error': 'openpyxl не установлен. pip install openpyxl'}
+
+    excel_path = NET_ROOT / project_name / f"{project_name}_mac_sn.xlsx"
+    result = {'ok': False, 'path': str(excel_path), 'error': None}
+
+    try:
+        wb = Workbook()
+        ws = wb.active
+        ws.title = 'Devices'
+
+        header_font  = Font(name='Calibri', bold=True, color='FFFFFF', size=11)
+        header_fill  = PatternFill('solid', fgColor='2F5496')
+        center_align = Alignment(horizontal='center', vertical='center')
+        data_font    = Font(name='Consolas', size=10)
+        thin         = Side(style='thin')
+        thin_border  = Border(left=thin, right=thin, top=thin, bottom=thin)
+        alt_fill     = PatternFill('solid', fgColor='DCE6F1')
+
+        headers    = ['PN', 'SN', 'MAC1 (LAN)', 'MAC2 (iDRAC/BMC)']
+        col_widths = [22, 22, 22, 22]
+
+        for col, (h, w) in enumerate(zip(headers, col_widths), start=1):
+            cell = ws.cell(row=1, column=col, value=h)
+            cell.font      = header_font
+            cell.fill      = header_fill
+            cell.alignment = center_align
+            cell.border    = thin_border
+            ws.column_dimensions[cell.column_letter].width = w
+        ws.row_dimensions[1].height = 20
+
+        sorted_devices = sorted(devices, key=lambda d: (d.get('part_number', ''), d.get('serial_number', '')))
+
+        for row_idx, dev in enumerate(sorted_devices, start=2):
+            fill = alt_fill if row_idx % 2 == 0 else None
+            values = [
+                dev.get('part_number', ''),
+                dev.get('serial_number', ''),
+                dev.get('mac1', ''),
+                dev.get('mac2', ''),
+            ]
+            for col, val in enumerate(values, start=1):
+                cell = ws.cell(row=row_idx, column=col, value=val)
+                cell.font      = data_font
+                cell.alignment = center_align
+                cell.border    = thin_border
+                if fill:
+                    cell.fill = fill
+
+        ws.freeze_panes = 'A2'
+        wb.save(excel_path)
+        log.info(f'[NET] Excel сохранён: {excel_path}')
+        result['ok'] = True
+
+    except Exception as e:
+        result['error'] = str(e)
+        log.error(f'[NET] Ошибка создания Excel: {e}')
+
+    return result
+
 # ── Запуск напрямую для проверки ─────────────────────────────────────────────
 if __name__ == '__main__':
     import argparse, json, sys

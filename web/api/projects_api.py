@@ -7,11 +7,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import desc
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict
 from datetime import datetime
 
 from src.database import get_db
-from src.models import Project, Device, Operation, SerialNumber, DeviceModel, User, WorkLog, ProjectRoute, RouteConfig
+from src.models import (
+    Project, Device, Operation, SerialNumber, DeviceModel, User,
+    WorkLog, ProjectRoute, RouteConfig,
+    MacAddress, DUAL_MAC_CATEGORIES, SINGLE_MAC_CATEGORIES,
+)
 from web.dependencies import get_current_user
 from web.ws_manager import manager as ws_manager
 
@@ -68,10 +72,17 @@ def _compute_project_stats(devices: list) -> dict:
     }
 
 
+class ManualMacEntry(BaseModel):
+    mac1: str = ''   # LAN
+    mac2: str = ''   # iDRAC/BMC (только для TIOGA/SERVAL/OCTOPUS)
+
+
 class DeviceRowInput(BaseModel):
     part_number: str
     model_id: int
     qty: int
+    mac_mode: str = 'pool'              # 'pool' | 'manual'
+    manual_macs: List[ManualMacEntry] = []   # при mac_mode='manual', len == qty
 
 
 class ProjectCreateRequest(BaseModel):
@@ -255,23 +266,24 @@ async def create_project(
         db.add(new_proj)
         db.flush()
         
-        current_counters = {}
         device_count = 0
-        
+        all_devices_for_excel: list[dict] = []   # для генерации Excel
+        mac_warnings: list[str] = []             # предупреждения о нехватке MAC
+
         for row in data.devices:
             if not row.part_number or not row.model_id or row.qty < 1:
                 continue
-                
+
             dm = db.query(DeviceModel).get(row.model_id)
             if not dm:
                 continue
-                
+
             prefix = dm.sn_prefix
             if prefix not in current_counters:
                 last_sn = db.query(SerialNumber).filter(
                     SerialNumber.model_id == dm.id
                 ).order_by(desc(SerialNumber.sn)).first()
-                
+
                 if last_sn:
                     num_str = last_sn.sn[len(prefix):]
                     try:
@@ -280,12 +292,17 @@ async def create_project(
                         current_counters[prefix] = 0
                 else:
                     current_counters[prefix] = 0
-                    
+
+            # Определяем нужны ли MAC для данной категории
+            cat = dm.category
+            needs_mac1 = cat in DUAL_MAC_CATEGORIES or cat in SINGLE_MAC_CATEGORIES
+            needs_mac2 = cat in DUAL_MAC_CATEGORIES
+
             for i in range(row.qty):
                 device_count += 1
                 current_counters[prefix] += 1
                 new_sn_str = f"{prefix}{current_counters[prefix]:05d}"
-                
+
                 new_device = Device(
                     project_id=new_proj.id,
                     name=f"{row.part_number} #{i+1}",
@@ -298,7 +315,7 @@ async def create_project(
                 )
                 db.add(new_device)
                 db.flush()
-                
+
                 new_sn_record = SerialNumber(
                     sn=new_sn_str,
                     model_id=dm.id,
@@ -307,8 +324,70 @@ async def create_project(
                     created_at=datetime.now()
                 )
                 db.add(new_sn_record)
-                
-        db.commit()
+
+                # ── Назначение MAC-адресов ──────────────────────────────────
+                import re as _re
+                def _norm_mac(raw: str) -> str | None:
+                    d = _re.sub(r'[^0-9a-fA-F]', '', raw.strip())
+                    return ':'.join(d[j:j+2].upper() for j in range(0, 12, 2)) if len(d) == 12 else None
+
+                mac1_val = mac2_val = None
+
+                if needs_mac1:
+                    if row.mac_mode == 'manual' and i < len(row.manual_macs):
+                        mac1_raw = row.manual_macs[i].mac1
+                        mac1_val = _norm_mac(mac1_raw) if mac1_raw else None
+                        if mac1_val:
+                            # Создаём запись или берём существующую свободную
+                            existing = db.query(MacAddress).filter_by(mac=mac1_val).first()
+                            if not existing:
+                                db.add(MacAddress(mac=mac1_val, mac_type='LAN', is_used=True,
+                                                  device_id=new_device.id, created_at=datetime.now()))
+                            elif not existing.is_used:
+                                existing.is_used = True
+                                existing.device_id = new_device.id
+                    else:
+                        # Из пула
+                        mac_rec = db.query(MacAddress).filter_by(mac_type='LAN', is_used=False).first()
+                        if mac_rec:
+                            mac_rec.is_used = True
+                            mac_rec.device_id = new_device.id
+                            mac1_val = mac_rec.mac
+                        else:
+                            mac_warnings.append(f'Нет свободных LAN MAC для {new_sn_str}')
+
+                if needs_mac2:
+                    if row.mac_mode == 'manual' and i < len(row.manual_macs):
+                        mac2_raw = row.manual_macs[i].mac2
+                        mac2_val = _norm_mac(mac2_raw) if mac2_raw else None
+                        if mac2_val:
+                            existing2 = db.query(MacAddress).filter_by(mac=mac2_val).first()
+                            if not existing2:
+                                db.add(MacAddress(mac=mac2_val, mac_type='IDRAC', is_used=True,
+                                                  device_id=new_device.id, created_at=datetime.now()))
+                            elif not existing2.is_used:
+                                existing2.is_used = True
+                                existing2.device_id = new_device.id
+                    else:
+                        mac_rec2 = db.query(MacAddress).filter_by(mac_type='IDRAC', is_used=False).first()
+                        if mac_rec2:
+                            mac_rec2.is_used = True
+                            mac_rec2.device_id = new_device.id
+                            mac2_val = mac_rec2.mac
+                        else:
+                            mac_warnings.append(f'Нет свободных IDRAC MAC для {new_sn_str}')
+
+                # Собираем данные для Excel (только устройства с MAC)
+                if needs_mac1:
+                    all_devices_for_excel.append({
+                        'part_number':   row.part_number,
+                        'serial_number': new_sn_str,
+                        'mac1':          mac1_val or '',
+                        'mac2':          mac2_val or '',
+                        'category':      cat,
+                    })
+
+        db.commit()  # ── сохраняем устройства + MAC-привязки
 
         # Назначить маршрут
         route_id = data.route_config_id
@@ -351,12 +430,28 @@ async def create_project(
             ]
             folder_result = _mod.create_project_folders(
                 project_name=new_proj.name,
-                devices=net_devices,
+                devices=[
+                    {'part_number': d.part_number, 'serial_number': d.serial_number}
+                    for d in new_proj.devices
+                ],
             )
             if folder_result['ok']:
                 _netlog.info(f'[NET] Папки созданы: {folder_result["created"]} шт. → {folder_result["path"]}')
             else:
                 _netlog.warning(f'[NET] Папки не созданы: {folder_result.get("error")}')
+
+            # ── Создать Excel-файл с MAC/SN ────────────────────────────────
+            if all_devices_for_excel and folder_result.get('ok'):
+                try:
+                    excel_result = _mod.create_project_excel(
+                        project_name=new_proj.name,
+                        devices=all_devices_for_excel,
+                    )
+                    if excel_result.get('ok'):
+                        _netlog.info(f'[NET] Excel создан: {excel_result["path"]}')
+                except Exception as _xe:
+                    _netlog.warning(f'[NET] Excel не создан: {_xe}')
+
         except Exception as _e:
             _netlog.warning(f'[NET] Ошибка при создании папок: {_e}', exc_info=True)
         # ── (ошибка сети не блокирует создание проекта) ───────────────────────
@@ -380,6 +475,7 @@ async def create_project(
             "message": f"Проект создан. Сгенерировано устройств: {device_count}",
             "net_folders": folder_result,
             "net_message": net_msg,
+            "mac_warnings": mac_warnings,
         }
         
     except Exception as e:

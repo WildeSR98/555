@@ -17,6 +17,13 @@ from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
 
+# ── MAC-address category constants ────────────────────────────────────────────
+# Категории с двумя MAC-адресами (LAN + iDRAC/BMC)
+DUAL_MAC_CATEGORIES   = {'TIOGA', 'SERVAL', 'OCTOPUS'}
+# Категории с одним MAC-адресом (только LAN)
+SINGLE_MAC_CATEGORIES = {'PC'}
+# Все остальные категории — без MAC (не попадают в Excel)
+
 
 # =============================================
 # Django auth_group (стандартная таблица)
@@ -708,3 +715,25 @@ class ProjectRouteStage(Base):
 
     def __repr__(self) -> str:
         return f"ProjectRouteStage(p={self.project_id} {self.device_type} {self.stage_key})"
+
+
+class MacAddress(Base):
+    """Пул MAC-адресов устройств.
+
+    mac_type:
+      'LAN'   — встроенный сетевой интерфейс
+      'IDRAC' — iDRAC / BMC (только для TIOGA, SERVAL, OCTOPUS)
+    """
+    __tablename__ = 'pm_mac_address'
+
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    mac        = Column(String(17), unique=True, nullable=False, index=True)   # AA:BB:CC:DD:EE:FF
+    mac_type   = Column(String(10), nullable=False)    # 'LAN' | 'IDRAC'
+    is_used    = Column(Boolean, default=False, nullable=False)
+    device_id  = Column(Integer, ForeignKey('tasks_device.id', ondelete='SET NULL'), nullable=True)
+    created_at = Column(DateTime)
+
+    device = relationship('Device', backref='mac_records')
+
+    def __repr__(self) -> str:
+        return f"MacAddress({self.mac} {self.mac_type} used={self.is_used})"
