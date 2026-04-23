@@ -81,6 +81,8 @@ class DeviceRowInput(BaseModel):
     part_number: str
     model_id: int
     qty: int
+    sn_mode: str = 'pool'               # 'pool' | 'manual'
+    manual_sns: List[str] = []          # при sn_mode='manual', len == qty
     mac_mode: str = 'pool'              # 'pool' | 'manual'
     manual_macs: List[ManualMacEntry] = []   # при mac_mode='manual', len == qty
 
@@ -300,8 +302,15 @@ async def create_project(
 
             for i in range(row.qty):
                 device_count += 1
-                current_counters[prefix] += 1
-                new_sn_str = f"{prefix}{current_counters[prefix]:05d}"
+
+                # ── Определение SN ──────────────────────────────────────────
+                if row.sn_mode == 'manual' and i < len(row.manual_sns):
+                    new_sn_str = row.manual_sns[i].strip()
+                    if not new_sn_str:
+                        new_sn_str = f"{prefix}{(current_counters.get(prefix,0)+1):05d}"
+                else:
+                    current_counters[prefix] += 1
+                    new_sn_str = f"{prefix}{current_counters[prefix]:05d}"
 
                 new_device = Device(
                     project_id=new_proj.id,
@@ -316,14 +325,15 @@ async def create_project(
                 db.add(new_device)
                 db.flush()
 
-                new_sn_record = SerialNumber(
-                    sn=new_sn_str,
-                    model_id=dm.id,
-                    is_used=True,
-                    device_id=new_device.id,
-                    created_at=datetime.now()
-                )
-                db.add(new_sn_record)
+                # SN запись в пул (always, даже для ручных)
+                if not db.query(SerialNumber).filter_by(sn=new_sn_str).first():
+                    db.add(SerialNumber(
+                        sn=new_sn_str,
+                        model_id=dm.id,
+                        is_used=True,
+                        device_id=new_device.id,
+                        created_at=datetime.now()
+                    ))
 
                 # ── Назначение MAC-адресов ──────────────────────────────────
                 import re as _re

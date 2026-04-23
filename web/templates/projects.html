@@ -98,7 +98,7 @@
             <div class="form-group"><label>Название (обязательно):</label><input type="text" id="pName" required></div>
             <div class="form-group"><label>Ссылка на спеку:</label><input type="text" id="pLink" placeholder="https://..."></div>
             <div class="form-group"><label>Проверочный код:</label><input type="text" id="pSpec"></div>
-            
+
             <div class="form-group">
                 <label>Менеджер:</label>
                 <select id="pManager">
@@ -109,9 +109,10 @@
                 </select>
             </div>
 
-            <h4 style="margin-top:20px; padding-bottom:10px; border-bottom:1px solid var(--border);">Устройства проекта (по партномерам)</h4>
+            <h4 style="margin-top:20px; padding-bottom:10px; border-bottom:1px solid var(--border);">Устройства проекта</h4>
+            <div id="macPoolStats" style="font-size:12px; color:var(--text-muted); margin-bottom:8px;"></div>
             <div id="deviceRows" style="margin-bottom:15px;"></div>
-            
+
             <button type="button" class="btn btn-secondary" onclick="addDeviceRow()">➕ Добавить партномер</button>
 
             <div style="margin-top:14px; padding:12px; background:rgba(99,102,241,.06); border-radius:8px; border:1px solid rgba(99,102,241,.2);">
@@ -122,7 +123,6 @@
                     <option value="">— Автовыбор —</option>
                 </select>
                 <div id="routeHint" style="font-size:11px; color:#6366f1; margin-top:4px;"></div>
-                <!-- Перечение маршрутов по типам устройств -->
                 <div id="routeBreakdown" style="display:none; margin-top:10px; padding:10px 12px; background:rgba(99,102,241,.05); border:1px solid rgba(99,102,241,.2); border-radius:6px;">
                     <div style="font-size:11px; font-weight:700; color:var(--text-muted); margin-bottom:6px; text-transform:uppercase; letter-spacing:.5px;">📋 Маршруты по типам устройств:</div>
                     <div id="routeBreakdownList"></div>
@@ -131,7 +131,7 @@
 
             <div class="modal-buttons" style="margin-top:20px;">
                 <button type="button" class="btn" style="background:var(--border);" onclick="closeModal('createModal')">Отмена</button>
-                <button type="submit" class="btn btn-primary">💾 Создать и сгенерировать SN</button>
+                <button type="submit" class="btn btn-primary">💾 Создать проект</button>
             </div>
         </form>
     </div>
@@ -143,10 +143,18 @@
 .tree-child1 { font-size: 13px; }
 .tree-child2 { font-size: 12px; font-style: italic; color: #475569;}
 .badge-color { display:inline-block; padding: 2px 8px; border-radius: 999px; color: white; font-size:11px; font-weight:bold; }
-.dev-row { display:flex; gap:10px; margin-top:10px; align-items:center; }
-.dev-row select { flex: 2; padding:8px; border-radius:4px; border:1px solid var(--border); }
-.dev-row input[type=text] { flex: 1; padding:8px; border-radius:4px; border:1px solid var(--border); }
-.dev-row input[type=number] { width: 80px; padding:8px; border-radius:4px; border:1px solid var(--border); }
+.dev-row { border:1px solid var(--border); border-radius:8px; padding:12px; margin-top:10px; background:var(--surface,rgba(255,255,255,.02)); }
+.dev-row-top { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.dev-row-top select { flex:2; min-width:120px; padding:7px; border-radius:4px; border:1px solid var(--border); background:var(--card-bg); color:var(--text); }
+.dev-row-top input[type=text] { flex:1; min-width:100px; padding:7px; border-radius:4px; border:1px solid var(--border); background:var(--card-bg); color:var(--text); }
+.dev-row-top input[type=number] { width:70px; padding:7px; border-radius:4px; border:1px solid var(--border); background:var(--card-bg); color:var(--text); }
+.mode-toggle { display:flex; gap:4px; margin-top:8px; }
+.mode-btn { padding:3px 10px; border-radius:4px; border:1px solid var(--border); background:transparent; color:var(--text-muted); cursor:pointer; font-size:12px; transition:.15s; }
+.mode-btn.active { background:rgba(99,102,241,.15); color:#6366f1; border-color:rgba(99,102,241,.4); }
+.manual-inputs { margin-top:8px; display:none; }
+.manual-inputs input { width:100%; margin-top:4px; padding:6px 8px; border-radius:4px; border:1px solid var(--border); background:var(--card-bg); color:var(--text); font-size:12px; font-family:monospace; }
+.mac-row { display:flex; gap:6px; margin-top:4px; }
+.mac-row input { flex:1; padding:6px 8px; border-radius:4px; border:1px solid var(--border); background:var(--card-bg); color:var(--text); font-size:12px; font-family:monospace; }
 </style>
 
 {% endblock %}
@@ -476,41 +484,139 @@ async function submitForceArchive(e) {
 }
 
 // ------ Форма создания ------
+let _macStats = {lan_free:0, idrac_free:0};
+
 function openCreateModal() {
     document.getElementById('createForm').reset();
     document.getElementById('deviceRows').innerHTML = '';
     addDeviceRow();
     loadRouteConfigs();
+    loadMacStats();
     document.getElementById('createModal').style.display = 'flex';
+}
+
+async function loadMacStats() {
+    try {
+        const r = await fetch('/api/mac-pool/stats');
+        const d = await r.json();
+        _macStats = {lan_free: d.lan.free, idrac_free: d.idrac.free};
+        const el = document.getElementById('macPoolStats');
+        if (el) el.innerHTML = `🔵 Пул MAC — свободно: <b>LAN: ${d.lan.free}</b> | <b>iDRAC: ${d.idrac.free}</b>`;
+    } catch(e) {}
+}
+
+function _buildManualInputs(container, qty, type) {
+    // type = 'sn' | 'mac'
+    container.innerHTML = '';
+    for (let i = 0; i < qty; i++) {
+        if (type === 'sn') {
+            const inp = document.createElement('input');
+            inp.type = 'text'; inp.className = 'manual-sn-val';
+            inp.placeholder = `SN #${i+1}`;
+            container.appendChild(inp);
+        } else {
+            const div = document.createElement('div');
+            div.className = 'mac-row';
+            div.innerHTML = `<input type="text" class="manual-mac1-val" placeholder="MAC1 (LAN) #${i+1}">
+                            <input type="text" class="manual-mac2-val" placeholder="MAC2 (iDRAC) #${i+1}" style="display:none;">`;  
+            container.appendChild(div);
+        }
+    }
+}
+
+function _refreshManualInputs(row) {
+    const qty  = parseInt(row.querySelector('.dev-qty').value) || 1;
+    const cat  = row.querySelector('.dev-category')?.value || '';
+    const dualMac = ['TIOGA','SERVAL','OCTOPUS'].includes(cat);
+    const hasMac  = dualMac || cat === 'PC';
+
+    // SN manual inputs
+    const snMode = row.querySelector('.sn-mode-manual')?.classList.contains('active');
+    const snBox  = row.querySelector('.manual-sn-box');
+    if (snMode && snBox) _buildManualInputs(snBox, qty, 'sn');
+
+    // MAC section visibility
+    const macSection = row.querySelector('.mac-section');
+    if (macSection) macSection.style.display = hasMac ? '' : 'none';
+
+    // MAC manual inputs
+    const macMode = row.querySelector('.mac-mode-manual')?.classList.contains('active');
+    const macBox  = row.querySelector('.manual-mac-box');
+    if (macMode && macBox && hasMac) {
+        _buildManualInputs(macBox, qty, 'mac');
+        // show MAC2 only for dual
+        macBox.querySelectorAll('.manual-mac2-val').forEach(el => el.style.display = dualMac ? '' : 'none');
+    }
+}
+
+function addDeviceRow() {
+    const container = document.getElementById('deviceRows');
+    const rowDiv = document.createElement('div');
+    rowDiv.className = 'dev-row';
+
+    const categories = [...new Set(deviceModels.map(m => m.category))];
+    let catOpts = '<option value="" disabled selected>-- Устройство --</option>';
+    categories.forEach(c => { catOpts += `<option value="${c}">${c}</option>`; });
+
+    rowDiv.innerHTML = `
+        <div class="dev-row-top">
+            <input type="text" class="dev-pn" placeholder="Part Number..." required>
+            <select class="dev-category" onchange="updateModels(this)" required>${catOpts}</select>
+            <select class="dev-model" required><option value="" disabled selected>-- Модель --</option></select>
+            <input type="number" class="dev-qty" value="1" min="1" max="1000" required
+                   onchange="_refreshManualInputs(this.closest('.dev-row'))">
+            <button type="button" class="btn btn-danger" onclick="this.closest('.dev-row').remove()">❌</button>
+        </div>
+
+        <!-- SN mode -->
+        <div style="margin-top:8px;">
+            <span style="font-size:12px; color:var(--text-muted); margin-right:6px;">SN:</span>
+            <div class="mode-toggle" style="display:inline-flex;">
+                <button type="button" class="mode-btn sn-mode-pool active"
+                    onclick="_setSnMode(this.closest('.dev-row'),'pool')">Из пула</button>
+                <button type="button" class="mode-btn sn-mode-manual"
+                    onclick="_setSnMode(this.closest('.dev-row'),'manual')">Вручную</button>
+            </div>
+            <div class="manual-inputs manual-sn-box" style="display:none;"></div>
+        </div>
+
+        <!-- MAC mode (скрыто для категорий без MAC) -->
+        <div class="mac-section" style="margin-top:8px; display:none;">
+            <span style="font-size:12px; color:var(--text-muted); margin-right:6px;">MAC:</span>
+            <div class="mode-toggle" style="display:inline-flex;">
+                <button type="button" class="mode-btn mac-mode-pool active"
+                    onclick="_setMacMode(this.closest('.dev-row'),'pool')">Из пула</button>
+                <button type="button" class="mode-btn mac-mode-manual"
+                    onclick="_setMacMode(this.closest('.dev-row'),'manual')">Вручную</button>
+            </div>
+            <div class="manual-inputs manual-mac-box" style="display:none;"></div>
+        </div>
+    `;
+
+    container.appendChild(rowDiv);
+    updateRouteBreakdown();
+}
+
+function _setSnMode(row, mode) {
+    row.querySelector('.sn-mode-pool').classList.toggle('active', mode==='pool');
+    row.querySelector('.sn-mode-manual').classList.toggle('active', mode==='manual');
+    const box = row.querySelector('.manual-sn-box');
+    box.style.display = mode === 'manual' ? '' : 'none';
+    if (mode === 'manual') _refreshManualInputs(row);
+}
+
+function _setMacMode(row, mode) {
+    row.querySelector('.mac-mode-pool').classList.toggle('active', mode==='pool');
+    row.querySelector('.mac-mode-manual').classList.toggle('active', mode==='manual');
+    const box = row.querySelector('.manual-mac-box');
+    box.style.display = mode === 'manual' ? '' : 'none';
+    if (mode === 'manual') _refreshManualInputs(row);
 }
 
 function closeModal(id) {
     document.getElementById(id).style.display = 'none';
 }
 
-function addDeviceRow() {
-    const container = document.getElementById('deviceRows');
-    const row = document.createElement('div');
-    row.className = 'dev-row';
-    
-    // Генерируем уникальные категории
-    const categories = [...new Set(deviceModels.map(m => m.category))];
-    
-    let catOpts = '<option value="" disabled selected>-- Устройство --</option>';
-    categories.forEach(c => {
-        catOpts += `<option value="${c}">${c}</option>`;
-    });
-
-    row.innerHTML = `
-        <input type="text" class="dev-pn" placeholder="PN..." required>
-        <select class="dev-category" onchange="updateModels(this)" required>${catOpts}</select>
-        <select class="dev-model" required><option value="" disabled selected>-- Производитель --</option></select>
-        <input type="number" class="dev-qty" value="1" min="1" max="1000" required>
-        <button type="button" class="btn btn-danger" onclick="this.parentElement.remove()">❌</button>
-    `;
-    container.appendChild(row);
-    updateRouteBreakdown();
-}
 
 let allRouteConfigs = [];
 
@@ -528,12 +634,13 @@ async function loadRouteConfigs() {
 
 function updateModels(categorySelect) {
     const category = categorySelect.value;
-    const modelSelect = categorySelect.parentElement.querySelector('.dev-model');
-    modelSelect.innerHTML = '<option value="" disabled selected>-- Производитель --</option>';
+    const row = categorySelect.closest('.dev-row');
+    const modelSelect = row.querySelector('.dev-model');
+    modelSelect.innerHTML = '<option value="" disabled selected>-- Модель --</option>';
     deviceModels.filter(m => m.category === category).forEach(m => {
         modelSelect.innerHTML += `<option value="${m.id}">${m.name}</option>`;
     });
-    // Автовыбор маршрута по типу
+    _refreshManualInputs(row);
     autoSelectRoute(category);
 }
 
@@ -597,23 +704,45 @@ function updateRouteBreakdown() {
 
 async function submitCreate(e) {
     e.preventDefault();
-    
-    const rows = Array.from(document.querySelectorAll('.dev-row')).map(r => ({
-        part_number: r.querySelector('.dev-pn').value.trim(),
-        model_id: parseInt(r.querySelector('.dev-model').value),
-        qty: parseInt(r.querySelector('.dev-qty').value)
-    })).filter(x => x.part_number && x.model_id);
-    
+
+    const rows = Array.from(document.querySelectorAll('.dev-row')).map(r => {
+        const cat     = r.querySelector('.dev-category')?.value || '';
+        const qty     = parseInt(r.querySelector('.dev-qty').value) || 1;
+        const snMode  = r.querySelector('.sn-mode-manual')?.classList.contains('active') ? 'manual' : 'pool';
+        const macMode = r.querySelector('.mac-mode-manual')?.classList.contains('active') ? 'manual' : 'pool';
+
+        const manualSns = snMode === 'manual'
+            ? Array.from(r.querySelectorAll('.manual-sn-val')).map(el => el.value.trim())
+            : [];
+
+        const manualMacs = macMode === 'manual'
+            ? Array.from(r.querySelectorAll('.mac-row')).map(mr => ({
+                mac1: mr.querySelector('.manual-mac1-val')?.value.trim() || '',
+                mac2: mr.querySelector('.manual-mac2-val')?.value.trim() || '',
+              }))
+            : [];
+
+        return {
+            part_number: r.querySelector('.dev-pn').value.trim(),
+            model_id:    parseInt(r.querySelector('.dev-model').value),
+            qty,
+            sn_mode:     snMode,
+            manual_sns:  manualSns,
+            mac_mode:    macMode,
+            manual_macs: manualMacs,
+        };
+    }).filter(x => x.part_number && x.model_id);
+
     const payload = {
-        code: document.getElementById('pCode').value,
-        name: document.getElementById('pName').value,
-        spec_link: document.getElementById('pLink').value,
-        spec_code: document.getElementById('pSpec').value,
-        manager_id: document.getElementById('pManager').value ? parseInt(document.getElementById('pManager').value) : null,
+        code:            document.getElementById('pCode').value,
+        name:            document.getElementById('pName').value,
+        spec_link:       document.getElementById('pLink').value,
+        spec_code:       document.getElementById('pSpec').value,
+        manager_id:      document.getElementById('pManager').value ? parseInt(document.getElementById('pManager').value) : null,
         route_config_id: document.getElementById('pRouteConfig').value ? parseInt(document.getElementById('pRouteConfig').value) : null,
-        devices: rows
+        devices:         rows
     };
-    
+
     try {
         const resp = await fetch('/api/projects', {
             method: 'POST',
@@ -621,8 +750,12 @@ async function submitCreate(e) {
             body: JSON.stringify(payload)
         });
         const res = await resp.json();
-        if(resp.ok) {
-            alert(res.message);
+        if (resp.ok) {
+            let msg = res.message;
+            if (res.mac_warnings && res.mac_warnings.length) {
+                msg += '\n⚠️ MAC: ' + res.mac_warnings.join('; ');
+            }
+            alert(msg + '\n' + (res.net_message || ''));
             closeModal('createModal');
             loadTree();
         } else {
