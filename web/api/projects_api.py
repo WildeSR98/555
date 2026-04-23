@@ -269,6 +269,7 @@ async def create_project(
         db.flush()
         
         device_count = 0
+        current_counters: dict[str, int] = {}    # SN счётчики по префиксу
         all_devices_for_excel: list[dict] = []   # для генерации Excel
         mac_warnings: list[str] = []             # предупреждения о нехватке MAC
 
