@@ -505,47 +505,70 @@ async function loadMacStats() {
     } catch(e) {}
 }
 
-function _buildManualInputs(container, qty, type) {
-    // type = 'sn' | 'mac'
+function _buildSnTextarea(container, qty) {
+    container.innerHTML = `
+        <div style="font-size:11px; color:#6366f1; margin-bottom:4px;">
+            📝 SN не из пула — вводите через пробел или с новой строки
+        </div>
+        <textarea class="manual-sn-val" rows="3"
+            placeholder="SN001 SN002 SN003..."
+            style="width:100%; padding:6px 8px; border-radius:4px; border:1px solid var(--border);
+                   background:var(--card-bg); color:var(--text); font-family:monospace; font-size:12px;
+                   resize:vertical; box-sizing:border-box;"
+            oninput="_updateSnCount(this, ${qty})"></textarea>
+        <div class="sn-count-hint" style="font-size:11px; color:var(--text-muted); margin-top:3px;">Введено: 0 SN</div>
+    `;
+}
+
+function _updateSnCount(ta, qty) {
+    const parts = ta.value.trim().split(/[\s\n]+/).filter(s => s.length > 0);
+    const hint = ta.closest('div').querySelector('.sn-count-hint');
+    if (hint) {
+        const ok = parts.length === qty;
+        hint.textContent = `Введено: ${parts.length} SN${ok ? '' : ' (нужно ' + qty + ')'}`;
+        hint.style.color = ok ? '#22c55e' : parts.length > qty ? '#ef4444' : 'var(--text-muted)';
+    }
+}
+
+function _buildMacInputs(container, qty, dualMac) {
     container.innerHTML = '';
     for (let i = 0; i < qty; i++) {
-        if (type === 'sn') {
-            const inp = document.createElement('input');
-            inp.type = 'text'; inp.className = 'manual-sn-val';
-            inp.placeholder = `SN #${i+1}`;
-            container.appendChild(inp);
-        } else {
-            const div = document.createElement('div');
-            div.className = 'mac-row';
-            div.innerHTML = `<input type="text" class="manual-mac1-val" placeholder="MAC1 (LAN) #${i+1}">
-                            <input type="text" class="manual-mac2-val" placeholder="MAC2 (iDRAC) #${i+1}" style="display:none;">`;  
-            container.appendChild(div);
-        }
+        const div = document.createElement('div');
+        div.className = 'mac-row';
+        div.style.marginTop = '4px';
+        div.innerHTML = `
+            <span style="font-size:11px; color:var(--text-muted); min-width:24px;">#${i+1}</span>
+            <input type="text" class="manual-mac1-val" placeholder="MAC1 (LAN)"
+                style="flex:1; padding:6px 8px; border-radius:4px; border:1px solid var(--border);
+                       background:var(--card-bg); color:var(--text); font-family:monospace; font-size:12px;">
+            ${dualMac ? `<input type="text" class="manual-mac2-val" placeholder="MAC2 (iDRAC/BMC)"
+                style="flex:1; padding:6px 8px; border-radius:4px; border:1px solid var(--border);
+                       background:var(--card-bg); color:var(--text); font-family:monospace; font-size:12px;">` : ''}
+        `;
+        container.appendChild(div);
     }
 }
 
 function _refreshManualInputs(row) {
-    const qty  = parseInt(row.querySelector('.dev-qty').value) || 1;
-    const cat  = row.querySelector('.dev-category')?.value || '';
+    const qty     = parseInt(row.querySelector('.dev-qty').value) || 1;
+    const cat     = row.querySelector('.dev-category')?.value || '';
     const dualMac = ['TIOGA','SERVAL','OCTOPUS'].includes(cat);
     const hasMac  = dualMac || cat === 'PC';
 
-    // SN manual inputs
-    const snMode = row.querySelector('.sn-mode-manual')?.classList.contains('active');
-    const snBox  = row.querySelector('.manual-sn-box');
-    if (snMode && snBox) _buildManualInputs(snBox, qty, 'sn');
-
-    // MAC section visibility
+    // MAC section visibility (show/hide whole mac block)
     const macSection = row.querySelector('.mac-section');
-    if (macSection) macSection.style.display = hasMac ? '' : 'none';
+    if (macSection) macSection.style.display = hasMac ? 'block' : 'none';
 
-    // MAC manual inputs
-    const macMode = row.querySelector('.mac-mode-manual')?.classList.contains('active');
-    const macBox  = row.querySelector('.manual-mac-box');
-    if (macMode && macBox && hasMac) {
-        _buildManualInputs(macBox, qty, 'mac');
-        // show MAC2 only for dual
-        macBox.querySelectorAll('.manual-mac2-val').forEach(el => el.style.display = dualMac ? '' : 'none');
+    // Rebuild SN inputs if manual mode active
+    if (row.querySelector('.sn-mode-manual')?.classList.contains('active')) {
+        const snBox = row.querySelector('.manual-sn-box');
+        if (snBox) _buildSnTextarea(snBox, qty);
+    }
+
+    // Rebuild MAC inputs if manual mode active
+    if (row.querySelector('.mac-mode-manual')?.classList.contains('active')) {
+        const macBox = row.querySelector('.manual-mac-box');
+        if (macBox && hasMac) _buildMacInputs(macBox, qty, dualMac);
     }
 }
 
@@ -601,16 +624,18 @@ function _setSnMode(row, mode) {
     row.querySelector('.sn-mode-pool').classList.toggle('active', mode==='pool');
     row.querySelector('.sn-mode-manual').classList.toggle('active', mode==='manual');
     const box = row.querySelector('.manual-sn-box');
-    box.style.display = mode === 'manual' ? '' : 'none';
+    box.style.display = mode === 'manual' ? 'block' : 'none';
     if (mode === 'manual') _refreshManualInputs(row);
+    else box.innerHTML = '';
 }
 
 function _setMacMode(row, mode) {
     row.querySelector('.mac-mode-pool').classList.toggle('active', mode==='pool');
     row.querySelector('.mac-mode-manual').classList.toggle('active', mode==='manual');
     const box = row.querySelector('.manual-mac-box');
-    box.style.display = mode === 'manual' ? '' : 'none';
+    box.style.display = mode === 'manual' ? 'block' : 'none';
     if (mode === 'manual') _refreshManualInputs(row);
+    else box.innerHTML = '';
 }
 
 function closeModal(id) {
@@ -712,7 +737,10 @@ async function submitCreate(e) {
         const macMode = r.querySelector('.mac-mode-manual')?.classList.contains('active') ? 'manual' : 'pool';
 
         const manualSns = snMode === 'manual'
-            ? Array.from(r.querySelectorAll('.manual-sn-val')).map(el => el.value.trim())
+            ? (() => {
+                const ta = r.querySelector('.manual-sn-val');
+                return ta ? ta.value.trim().split(/[\s\n]+/).filter(s => s.length > 0) : [];
+              })()
             : [];
 
         const manualMacs = macMode === 'manual'
