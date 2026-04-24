@@ -53,7 +53,14 @@ copy .env.example .env
 
 ### Запуск веб-сервера
 
-```bash
+> **Важно:** Все команды `python` выполняются из активированного виртуального окружения.  
+> Если venv не активирован, используйте `.venv\Scripts\python.exe` вместо `python`.
+
+```powershell
+# Активировать venv (один раз за сессию терминала)
+.venv\Scripts\activate
+
+# Запустить сервер (разработка)
 python -m uvicorn web.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
@@ -504,9 +511,15 @@ python build.py
 
 ### Продакшн-запуск веб-сервера
 
-```bash
+```powershell
+# Убедитесь что venv активирован
+.venv\Scripts\activate
+
+# Продакшн (без --reload, с несколькими воркерами)
 python -m uvicorn web.main:app --host 0.0.0.0 --port 8000 --workers 4
 ```
+
+> `--workers 4` несовместим с `--reload`. Используйте `--workers` только в продакшне.
 
 ---
 
