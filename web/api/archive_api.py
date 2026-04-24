@@ -190,7 +190,7 @@ def archive_project(
         net_base = os.environ.get('NET_PROJECTS_DIR', '')
         if net_base:
             src_folder = Path(net_base) / project.name
-            archive_folder = Path(net_base) / 'Архив'
+            archive_folder = Path(net_base) / 'Archive'
             dst_folder = archive_folder / project.name
 
             if src_folder.exists():
