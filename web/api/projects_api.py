@@ -516,9 +516,15 @@ async def create_project(
         
     except Exception as e:
         db.rollback()
-        if 'UNIQUE constraint failed' in str(e):
-            raise HTTPException(400, "Проект с таким кодом уже существует")
-        raise HTTPException(500, str(e))
+        err_str = str(e)
+        # PostgreSQL: "duplicate key value violates unique constraint"
+        # SQLite:     "UNIQUE constraint failed"
+        if 'duplicate key value' in err_str or 'UNIQUE constraint failed' in err_str:
+            # Определяем по какому полю конфликт
+            if 'code' in err_str:
+                raise HTTPException(400, f'Проект с кодом "{data.code}" уже существует. Используйте другой код.')
+            raise HTTPException(400, 'Проект с таким кодом уже существует')
+        raise HTTPException(500, err_str)
 
 
 @router.post("/{project_id}/delete")
