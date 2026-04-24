@@ -84,11 +84,10 @@
     <div id="macAddForm" class="card" style="display:none; padding:14px;">
         <h4 style="margin-bottom:10px;">Добавить MAC вручную</h4>
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-            <input type="text" id="macAddVal" placeholder="AA:BB:CC:DD:EE:FF" style="flex:1; min-width:180px; padding:8px; border-radius:4px; border:1px solid var(--border); background:var(--card-bg); color:var(--text); font-family:monospace;">
-            <select id="macAddType" style="padding:8px; border-radius:4px; border:1px solid var(--border); background:var(--card-bg); color:var(--text);">
-                <option value="LAN">LAN</option>
-                <option value="IDRAC">BMC</option>
-            </select>
+            <input type="text" id="macAddVal" placeholder="AA:BB:CC:DD:EE:FF"
+                style="flex:1; min-width:180px; padding:8px; border-radius:4px;
+                       border:1px solid var(--border); background:var(--card-bg);
+                       color:var(--text); font-family:monospace;">
             <button class="btn btn-primary" onclick="submitMacAdd()">➕ Добавить</button>
         </div>
     </div>
@@ -654,14 +653,13 @@ function loadMacListDebounce() {
 }
 
 async function submitMacAdd() {
-    const mac  = document.getElementById('macAddVal').value.trim();
-    const type = document.getElementById('macAddType').value;
+    const mac = document.getElementById('macAddVal').value.trim();
     if (!mac) return;
     try {
         const resp = await fetch('/api/mac-pool/add', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({mac, mac_type: type})
+            body: JSON.stringify({mac})
         });
         const res = await resp.json();
         if (resp.ok) {

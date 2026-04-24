@@ -31,8 +31,7 @@ def normalize_mac(raw: str) -> Optional[str]:
 # ── Schemas ────────────────────────────────────────────────────────────────────
 
 class MacManualInput(BaseModel):
-    mac:      str
-    mac_type: str   # 'LAN' | 'IDRAC'
+    mac: str
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -172,11 +171,9 @@ def add_mac_manual(
     mac = normalize_mac(data.mac)
     if not mac:
         raise HTTPException(400, f'Неверный формат MAC: {data.mac!r}')
-    if data.mac_type.upper() not in ('LAN', 'IDRAC'):
-        raise HTTPException(400, 'mac_type должен быть LAN или IDRAC (BMC)')
     if db.query(MacAddress).filter_by(mac=mac).first():
         raise HTTPException(400, f'MAC {mac} уже существует в пуле')
-    db.add(MacAddress(mac=mac, mac_type=data.mac_type.upper(), is_used=False, created_at=datetime.now()))
+    db.add(MacAddress(mac=mac, mac_type='LAN', is_used=False, created_at=datetime.now()))
     db.commit()
     return {'ok': True, 'mac': mac}
 
@@ -213,9 +210,8 @@ async def import_macs_from_file(
             for row in ws.iter_rows(min_row=1, values_only=True):
                 if not row or row[0] is None:
                     continue
-                mac_raw  = str(row[0]).strip()
-                type_raw = str(row[1]).strip().upper() if len(row) > 1 and row[1] else 'LAN'
-                rows.append((mac_raw, type_raw))
+                mac_raw = str(row[0]).strip()
+                rows.append(mac_raw)
         except Exception as e:
             raise HTTPException(400, f'Ошибка чтения Excel: {e}')
     else:
@@ -225,26 +221,23 @@ async def import_macs_from_file(
             line = line.strip()
             if not line:
                 continue
+            # берём первый токен (если несколько колонок, вторая игнорируется)
             parts = re.split(r'[,;|\t]', line, maxsplit=1)
-            mac_raw  = parts[0].strip()
-            type_raw = parts[1].strip().upper() if len(parts) > 1 else 'LAN'
-            rows.append((mac_raw, type_raw))
+            mac_raw = parts[0].strip()
+            rows.append(mac_raw)
 
     added = skipped_dup = skipped_bad = 0
-    for mac_raw, type_raw in rows:
+    for mac_raw in rows:
         mac = normalize_mac(mac_raw)
         if not mac:
             skipped_bad += 1
             continue
-        if type_raw not in ('LAN', 'IDRAC'):
-            type_raw = 'LAN'
-        # Пропустить заголовочную строку
         if mac_raw.upper() in ('MAC', 'MAC ADDRESS', 'ADDRESS'):
             continue
         if db.query(MacAddress).filter_by(mac=mac).first():
             skipped_dup += 1
             continue
-        db.add(MacAddress(mac=mac, mac_type=type_raw, is_used=False, created_at=datetime.now()))
+        db.add(MacAddress(mac=mac, mac_type='LAN', is_used=False, created_at=datetime.now()))
         added += 1
 
     if added:
