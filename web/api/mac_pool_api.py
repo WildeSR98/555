@@ -39,15 +39,114 @@ class MacManualInput(BaseModel):
 
 @router.get('/stats')
 def get_mac_stats(db: Session = Depends(get_db)):
-    """Статистика пула MAC-адресов."""
-    total_lan   = db.query(MacAddress).filter_by(mac_type='LAN').count()
-    free_lan    = db.query(MacAddress).filter_by(mac_type='LAN',   is_used=False).count()
-    total_idrac = db.query(MacAddress).filter_by(mac_type='IDRAC').count()
-    free_idrac  = db.query(MacAddress).filter_by(mac_type='IDRAC', is_used=False).count()
+    """Статистика пула MAC-адресов.
+    MAC выдаются попарно (LAN + BMC), поэтому показываем только LAN-счётчик.
+    """
+    total_lan = db.query(MacAddress).filter_by(mac_type='LAN').count()
+    free_lan  = db.query(MacAddress).filter_by(mac_type='LAN', is_used=False).count()
+    # BMC тоже считаем для полноты картины, но не отображаем отдельно
+    total_bmc = db.query(MacAddress).filter_by(mac_type='IDRAC').count()
+    free_bmc  = db.query(MacAddress).filter_by(mac_type='IDRAC', is_used=False).count()
     return {
-        'lan':   {'total': total_lan,   'free': free_lan,   'used': total_lan - free_lan},
-        'idrac': {'total': total_idrac, 'free': free_idrac, 'used': total_idrac - free_idrac},
+        'lan':   {'total': total_lan, 'free': free_lan,  'used': total_lan - free_lan},
+        'idrac': {'total': total_bmc, 'free': free_bmc,  'used': total_bmc - free_bmc},
     }
+
+
+@router.get('/paired')
+def list_macs_paired(
+    used:   str = 'ALL',   # FREE | USED | ALL
+    search: str = '',
+    limit:  int = 300,
+    db: Session = Depends(get_db),
+):
+    """
+    Список MAC-адресов сгруппированных по устройству: одна строка = SN + проект + LAN + BMC.
+    Свободные MAC (без устройства) device_id=None — отображаем как отдельные строки.
+    """
+    from src.models import Project
+    from sqlalchemy.orm import joinedload
+
+    q = db.query(MacAddress).options(joinedload(MacAddress.device))
+
+    if used.upper() == 'FREE':
+        q = q.filter(MacAddress.is_used == False)
+    elif used.upper() == 'USED':
+        q = q.filter(MacAddress.is_used == True)
+    if search:
+        q = q.filter(MacAddress.mac.contains(search.upper()))
+
+    all_rows = q.order_by(MacAddress.device_id.desc(), MacAddress.mac_type).limit(limit * 2).all()
+
+    # Группируем по device_id
+    from collections import defaultdict
+    by_device: dict = defaultdict(lambda: {'lan': None, 'bmc': None, 'device': None})
+    free_lans = []   # свободные LAN (device_id is None)
+    free_bmcs = []   # свободные BMC
+
+    for r in all_rows:
+        if r.device_id is None:
+            if r.mac_type == 'LAN':
+                free_lans.append(r)
+            else:
+                free_bmcs.append(r)
+        else:
+            key = r.device_id
+            by_device[key]['device'] = r.device
+            if r.mac_type == 'LAN':
+                by_device[key]['lan'] = r
+            else:
+                by_device[key]['bmc'] = r
+
+    result = []
+
+    # Сначала используемые пары
+    for dev_id, info in by_device.items():
+        dev = info['device']
+        lan = info['lan']
+        bmc = info['bmc']
+        project_name = ''
+        if dev and dev.project_id:
+            proj = db.query(Project).get(dev.project_id)
+            project_name = proj.name if proj else ''
+        result.append({
+            'device_sn':    dev.serial_number if dev else None,
+            'project_name': project_name,
+            'lan_mac':      lan.mac if lan else None,
+            'bmc_mac':      bmc.mac if bmc else None,
+            'lan_id':       lan.id  if lan else None,
+            'bmc_id':       bmc.id  if bmc else None,
+            'is_used':      True,
+            'created_at':   (lan or bmc).created_at.strftime('%d.%m.%Y') if (lan or bmc) else None,
+        })
+
+    # Свободные LAN — паруем с BMC по индексу
+    for i, lan in enumerate(free_lans):
+        bmc = free_bmcs[i] if i < len(free_bmcs) else None
+        result.append({
+            'device_sn':    None,
+            'project_name': None,
+            'lan_mac':      lan.mac,
+            'bmc_mac':      bmc.mac if bmc else None,
+            'lan_id':       lan.id,
+            'bmc_id':       bmc.id if bmc else None,
+            'is_used':      False,
+            'created_at':   lan.created_at.strftime('%d.%m.%Y') if lan.created_at else None,
+        })
+    # BMC без пары
+    for bmc in free_bmcs[len(free_lans):]:
+        result.append({
+            'device_sn':    None,
+            'project_name': None,
+            'lan_mac':      None,
+            'bmc_mac':      bmc.mac,
+            'lan_id':       None,
+            'bmc_id':       bmc.id,
+            'is_used':      False,
+            'created_at':   bmc.created_at.strftime('%d.%m.%Y') if bmc.created_at else None,
+        })
+
+    return result[:limit]
 
 
 @router.get('/list')

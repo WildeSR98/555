@@ -61,29 +61,18 @@
 
 <!-- MAC Panel -->
 <div id="macPanel" style="display:none; flex-direction:column; gap:16px;">
-    <!-- Stats -->
+    <!-- Stats: показываем только LAN (= кол-во пар) -->
     <div class="card" style="display:flex; gap:30px; align-items:center; padding:16px 24px; flex-wrap:wrap;">
         <div>
-            <div style="font-size:12px; color:var(--text-muted);">LAN — всего</div>
-            <div id="macStatLanTotal" style="font-size:22px; font-weight:800;">—</div>
+            <div style="font-size:12px; color:var(--text-muted);">LAN — всего (пар)</div>
+            <div id="macStatLanTotal" style="font-size:28px; font-weight:800;">—</div>
         </div>
         <div>
             <div style="font-size:12px; color:#22c55e;">LAN — свободно</div>
-            <div id="macStatLanFree" style="font-size:22px; font-weight:800; color:#22c55e;">—</div>
-        </div>
-        <div style="width:1px; height:40px; background:var(--border);"></div>
-        <div>
-            <div style="font-size:12px; color:var(--text-muted);">BMC — всего</div>
-            <div id="macStatIdracTotal" style="font-size:22px; font-weight:800;">—</div>
-        </div>
-        <div>
-            <div style="font-size:12px; color:#3b82f6;">BMC — свободно</div>
-            <div id="macStatIdracFree" style="font-size:22px; font-weight:800; color:#3b82f6;">—</div>
+            <div id="macStatLanFree" style="font-size:28px; font-weight:800; color:#22c55e;">—</div>
         </div>
         <div style="margin-left:auto; display:flex; gap:8px;">
-            <!-- Ручное добавление -->
-            <button class="btn btn-secondary" onclick="document.getElementById('macAddForm').style.display=document.getElementById('macAddForm').style.display==='none'?'':'none'">+ Добавить MAC</button>
-            <!-- Импорт файла -->
+            <button class="btn btn-secondary" onclick="document.getElementById('macAddForm').style.display=document.getElementById('macAddForm').style.display==='none'?'block':'none'">+ Добавить MAC</button>
             <label class="btn btn-success" style="cursor:pointer; margin:0;">
                 📥 Импорт Excel/CSV
                 <input type="file" accept=".xlsx,.xls,.csv,.txt" style="display:none;" onchange="importMacFile(this)">
@@ -104,25 +93,27 @@
         </div>
     </div>
 
-    <!-- Filters + list -->
-    <div class="card" style="display:flex; flex-direction:column; gap:10px; flex:1; overflow:hidden;">
+    <!-- Filters + paired list -->
+    <div class="card" style="display:flex; flex-direction:column; gap:10px; overflow:hidden;">
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-            <select id="macFilterType" onchange="loadMacList()" style="padding:7px; border-radius:4px; border:1px solid var(--border); background:var(--card-bg); color:var(--text);">
-                <option value="ALL">Все типы</option>
-                <option value="LAN">LAN</option>
-                <option value="IDRAC">BMC</option>
-            </select>
             <select id="macFilterUsed" onchange="loadMacList()" style="padding:7px; border-radius:4px; border:1px solid var(--border); background:var(--card-bg); color:var(--text);">
                 <option value="ALL">Все</option>
                 <option value="FREE">Свободные</option>
                 <option value="USED">Используемые</option>
             </select>
-            <input type="text" id="macSearch" placeholder="🔍 Поиск MAC..." style="flex:1; padding:7px; border-radius:4px; border:1px solid var(--border); background:var(--card-bg); color:var(--text); font-family:monospace;" oninput="loadMacListDebounce()">
+            <input type="text" id="macSearch" placeholder="🔍 Поиск MAC / SN / проект..." style="flex:1; padding:7px; border-radius:4px; border:1px solid var(--border); background:var(--card-bg); color:var(--text); font-family:monospace;" oninput="loadMacListDebounce()">
         </div>
-        <div style="overflow-y:auto; flex:1;">
+        <div style="overflow-y:auto;">
             <table class="table" id="macTable">
                 <thead>
-                    <tr><th>MAC</th><th>Тип</th><th>Статус</th><th>Устройство (SN)</th><th>Дата</th><th></th></tr>
+                    <tr>
+                        <th>Устройство (SN)</th>
+                        <th>Проект</th>
+                        <th>LAN MAC</th>
+                        <th>BMC MAC</th>
+                        <th>Дата</th>
+                        <th>Статус</th>
+                    </tr>
                 </thead>
                 <tbody id="macBody"><tr><td colspan="6" class="text-muted text-center">Загрузка...</td></tr></tbody>
             </table>
@@ -620,11 +611,10 @@ async function loadMacStats() {
 }
 
 async function loadMacList() {
-    const type   = document.getElementById('macFilterType')?.value || 'ALL';
     const used   = document.getElementById('macFilterUsed')?.value || 'ALL';
     const search = document.getElementById('macSearch')?.value || '';
     try {
-        const url = `/api/mac-pool/list?mac_type=${type}&used=${used}&search=${encodeURIComponent(search)}&limit=300`;
+        const url = `/api/mac-pool/paired?used=${used}&search=${encodeURIComponent(search)}&limit=300`;
         const rows = await (await fetch(url)).json();
         const tbody = document.getElementById('macBody');
         if (!rows.length) {
@@ -632,21 +622,26 @@ async function loadMacList() {
             return;
         }
         tbody.innerHTML = rows.map(r => {
-            const usedBadge = r.is_used
+            const statusBadge = r.is_used
                 ? '<span class="badge badge-success">Использован</span>'
                 : '<span class="badge">Свободен</span>';
-            const typeBadge = r.mac_type === 'LAN'
-                ? '<span style="color:#22c55e;font-weight:600;">LAN</span>'
-                : '<span style="color:#3b82f6;font-weight:600;">BMC</span>';
-            const delBtn = r.is_used ? '' :
-                `<button class="btn btn-danger" style="padding:2px 8px;font-size:11px;" onclick="deleteMac(${r.id},'${r.mac}')">🗑</button>`;
+            const lanCode = r.lan_mac
+                ? `<code style="color:#22c55e;">${escapeHTML(r.lan_mac)}</code>`
+                : '<span class="text-muted">—</span>';
+            const bmcCode = r.bmc_mac
+                ? `<code style="color:#3b82f6;">${escapeHTML(r.bmc_mac)}</code>`
+                : '<span class="text-muted">—</span>';
+            const delBtn = !r.is_used && r.lan_id
+                ? `<button class="btn btn-danger" style="padding:2px 8px;font-size:11px;"
+                       onclick="deleteMacPair(${r.lan_id || 'null'},${r.bmc_id || 'null'})">🗑</button>`
+                : '';
             return `<tr>
-                <td><code>${escapeHTML(r.mac)}</code></td>
-                <td>${typeBadge}</td>
-                <td>${usedBadge}</td>
-                <td>${escapeHTML(r.device_sn || '—')}</td>
+                <td><code>${escapeHTML(r.device_sn || '—')}</code></td>
+                <td>${escapeHTML(r.project_name || '—')}</td>
+                <td>${lanCode}</td>
+                <td>${bmcCode}</td>
                 <td>${escapeHTML(r.created_at || '—')}</td>
-                <td>${delBtn}</td>
+                <td>${statusBadge} ${delBtn}</td>
             </tr>`;
         }).join('');
     } catch(e) { console.error(e); }
@@ -692,13 +687,15 @@ async function importMacFile(input) {
     input.value = '';
 }
 
-async function deleteMac(id, mac) {
-    if (!confirm(`Удалить MAC ${mac} из пула?`)) return;
+async function deleteMacPair(lanId, bmcId) {
+    if (!confirm('Удалить пару MAC (LAN + BMC) из пула?')) return;
     try {
-        const resp = await fetch(`/api/mac-pool/${id}`, {method: 'DELETE'});
-        const res = await resp.json();
-        if (resp.ok) { loadMacStats(); loadMacList(); }
-        else alert(res.detail || 'Ошибка');
+        const delIds = [lanId, bmcId].filter(id => id && id !== 'null');
+        for (const id of delIds) {
+            await fetch(`/api/mac-pool/${id}`, {method: 'DELETE'});
+        }
+        loadMacStats();
+        loadMacList();
     } catch(e) { alert(e.message); }
 }
 </script>
