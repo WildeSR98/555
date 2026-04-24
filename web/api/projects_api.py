@@ -342,14 +342,42 @@ async def create_project(
                     d = _re.sub(r'[^0-9a-fA-F]', '', raw.strip())
                     return ':'.join(d[j:j+2].upper() for j in range(0, 12, 2)) if len(d) == 12 else None
 
+                def _mac_to_int(mac: str) -> int:
+                    return int(mac.replace(':', ''), 16)
+
+                def _int_to_mac(n: int) -> str:
+                    h = f'{n:012X}'
+                    return ':'.join(h[i:i+2] for i in range(0, 12, 2))
+
                 def _next_free_mac(db, device_id):
-                    """Берёт следующий свободный MAC из пула по порядку (id asc)."""
+                    """
+                    Берёт следующий свободный MAC из пула (если есть),
+                    иначе генерирует новый = последний MAC в БД + 1.
+                    """
+                    # 1. Попытка взять из свободных
                     rec = db.query(MacAddress).filter_by(is_used=False).order_by(MacAddress.id).first()
                     if rec:
                         rec.is_used   = True
                         rec.device_id = device_id
                         return rec.mac
-                    return None
+
+                    # 2. Генерация: якорь = последний MAC в БД (по id desc)
+                    last = db.query(MacAddress).order_by(MacAddress.id.desc()).first()
+                    if last:
+                        new_mac = _int_to_mac(_mac_to_int(last.mac) + 1)
+                    else:
+                        # Нет вообще ни одного MAC — начинаем с заглушки (должны настроить якорь вручную)
+                        raise ValueError('MAC-пул пуст. Добавьте хотя бы один MAC вручную как якорь.')
+
+                    # Проверка коллизии (крайне маловероятна, но на всякий)
+                    while db.query(MacAddress).filter_by(mac=new_mac).first():
+                        new_mac = _int_to_mac(_mac_to_int(new_mac) + 1)
+
+                    new_rec = MacAddress(mac=new_mac, mac_type='LAN', is_used=True,
+                                        device_id=device_id, created_at=datetime.now())
+                    db.add(new_rec)
+                    db.flush()   # получаем id без commit
+                    return new_mac
 
                 def _assign_manual_mac(db, raw: str, device_id):
                     """Назначает вручную введённый MAC (создаёт если нет в пуле)."""
@@ -371,19 +399,19 @@ async def create_project(
                     if row.mac_mode == 'manual' and i < len(row.manual_macs):
                         mac1_val = _assign_manual_mac(db, row.manual_macs[i].mac1, new_device.id)
                     else:
-                        # Берём следующий из пула по порядку
-                        mac1_val = _next_free_mac(db, new_device.id)
-                        if mac1_val is None:
-                            mac_warnings.append(f'Нет свободных MAC для {new_sn_str} (MAC1)')
+                        try:
+                            mac1_val = _next_free_mac(db, new_device.id)
+                        except ValueError as e:
+                            mac_warnings.append(str(e))
 
                 if needs_mac2:
                     if row.mac_mode == 'manual' and i < len(row.manual_macs):
                         mac2_val = _assign_manual_mac(db, row.manual_macs[i].mac2, new_device.id)
                     else:
-                        # Следующий за MAC1
-                        mac2_val = _next_free_mac(db, new_device.id)
-                        if mac2_val is None:
-                            mac_warnings.append(f'Нет свободных MAC для {new_sn_str} (MAC2)')
+                        try:
+                            mac2_val = _next_free_mac(db, new_device.id)
+                        except ValueError as e:
+                            mac_warnings.append(str(e))
 
                 # Собираем данные для Excel (только устройства с MAC)
                 if needs_mac1:
