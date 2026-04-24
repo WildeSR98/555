@@ -2,6 +2,10 @@
 API эндпоинты для Архива проектов.
 Завершённые проекты + история WorkLog по каждому.
 """
+import os
+import shutil
+import logging
+from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
@@ -11,6 +15,8 @@ from pydantic import BaseModel
 from src.database import get_db
 from src.models import Project, Device, WorkLog, User, ProjectRoute
 from web.dependencies import get_current_user
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -184,30 +190,25 @@ def archive_project(
     # ── Перемещение папки проекта в архив на сетевом диске ──────────────────
     net_msg = ""
     try:
-        import os, shutil
-        from pathlib import Path
-
         net_base = os.environ.get('NET_PROJECTS_DIR', '')
         if net_base:
-            src_folder = Path(net_base) / project.name
+            src_folder    = Path(net_base) / project.name
             archive_folder = Path(net_base) / 'Archive'
-            dst_folder = archive_folder / project.name
+            dst_folder    = archive_folder / project.name
 
             if src_folder.exists():
                 archive_folder.mkdir(parents=True, exist_ok=True)
                 if dst_folder.exists():
-                    # Папка уже есть в архиве — добавляем timestamp
                     ts = datetime.now().strftime('%Y%m%d_%H%M%S')
                     dst_folder = archive_folder / f"{project.name}_{ts}"
                 shutil.move(str(src_folder), str(dst_folder))
-                net_msg = f"Папка проекта перемещена в Архив: {dst_folder}"
+                net_msg = f"Папка проекта перемещена в Archive: {dst_folder}"
             else:
                 net_msg = f"Папка проекта не найдена на сетевом диске: {src_folder}"
         else:
             net_msg = "NET_PROJECTS_DIR не задан — папка не перемещена"
     except Exception as _e:
-        import logging as _log
-        _log.getLogger(__name__).warning(f"[NET] Ошибка перемещения папки в архив: {_e}")
+        logger.warning(f"[NET] Ошибка перемещения папки в архив: {_e}")
         net_msg = f"Ошибка перемещения папки: {_e}"
 
     return {
@@ -215,3 +216,4 @@ def archive_project(
         "message": f"Проект «{project.name}» перемещён в архив{forced_tag}",
         "net_message": net_msg,
     }
+
