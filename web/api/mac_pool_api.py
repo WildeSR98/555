@@ -60,8 +60,7 @@ def list_macs_paired(
 ):
     """
     Список MAC сгруппированных по устройству.
-    У устройства может быть 1 или 2 MAC (зависит от категории).
-    Свободные MAC отображаются по одному.
+    Поиск работает по MAC-адресу, SN устройства и названию проекта.
     """
     from src.models import Project
     from sqlalchemy.orm import joinedload
@@ -72,10 +71,11 @@ def list_macs_paired(
         q = q.filter(MacAddress.is_used == False)
     elif used.upper() == 'USED':
         q = q.filter(MacAddress.is_used == True)
-    if search:
-        q = q.filter(MacAddress.mac.contains(search.upper()))
 
-    all_rows = q.order_by(MacAddress.id).limit(limit * 2).all()
+    # Поиск — пост-фильтрация по MAC, SN и проекту после группировки
+    s_upper = search.strip().upper()
+
+    all_rows = q.order_by(MacAddress.id).limit(limit * 4).all()
 
     # Группируем по device_id (None = свободные)
     by_device: dict = defaultdict(lambda: {'macs': [], 'device': None})
@@ -121,6 +121,16 @@ def list_macs_paired(
             'is_used':      False,
             'created_at':   r.created_at.strftime('%d.%m.%Y') if r.created_at else None,
         })
+
+    # Пост-фильтрация по SN и проекту (если есть строка поиска)
+    if s_upper:
+        result = [
+            r for r in result
+            if s_upper in (r['mac1'] or '').upper()
+            or s_upper in (r['mac2'] or '').upper()
+            or s_upper in (r['device_sn'] or '').upper()
+            or s_upper in (r['project_name'] or '').upper()
+        ]
 
     return result[:limit]
 
