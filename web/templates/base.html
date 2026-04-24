@@ -187,7 +187,10 @@
             ws.onerror = () => ws.close();
         }
 
-        // ─── Toast ───
+        // ─── Toast (с группировкой по посту) ───
+        // Храним активные тосты-группы: ключ = worker|new_status
+        const _toastGroups = {};
+
         function showToast(evt) {
             const container = document.getElementById('ws-toast-container');
             if (!container) return;
@@ -198,25 +201,67 @@
             };
             const icon = actionIcons[evt.action] || '⚡';
 
+            // Ключ группы = кто + куда перешёл
+            const groupKey = `${evt.worker}|${evt.new_status_display}`;
+            const existing = _toastGroups[groupKey];
+
+            if (existing && existing.el.parentElement) {
+                // Обновляем существующий тост: увеличиваем счётчик
+                existing.count += 1;
+                const countEl = existing.el.querySelector('.ws-toast-count');
+                if (countEl) {
+                    countEl.textContent = `×${existing.count}`;
+                    countEl.classList.remove('flash-count');
+                    void countEl.offsetWidth; // reflow для перезапуска анимации
+                    countEl.classList.add('flash-count');
+                }
+                // Обновляем список устройств
+                const listEl = existing.el.querySelector('.ws-toast-devices');
+                if (listEl) {
+                    const item = document.createElement('span');
+                    item.style.cssText = 'display:block; font-size:11px; color:var(--text-muted);';
+                    item.textContent = `${evt.device_name} ${evt.serial_number}`;
+                    listEl.appendChild(item);
+                }
+                // Сбрасываем таймер авто-закрытия
+                clearTimeout(existing.timer);
+                existing.timer = setTimeout(() => {
+                    existing.el.classList.add('hide');
+                    setTimeout(() => {
+                        if (existing.el.parentElement) existing.el.remove();
+                        delete _toastGroups[groupKey];
+                    }, 400);
+                }, 5000);
+                return;
+            }
+
+            // Создаём новый тост
             const toast = document.createElement('div');
             toast.className = 'ws-toast';
             toast.innerHTML = `
-                <div class="ws-toast-title">${icon} ${escapeHTML(evt.device_name)} <span style="font-weight:400;font-size:11px;color:var(--text-muted);">${escapeHTML(evt.serial_number)}</span></div>
+                <div class="ws-toast-title" style="display:flex;align-items:center;gap:6px;">
+                    <span>${icon} ${escapeHTML(evt.device_name)} <span style="font-weight:400;font-size:11px;color:var(--text-muted);">${escapeHTML(evt.serial_number)}</span></span>
+                    <span class="ws-toast-count" style="margin-left:auto;font-size:11px;font-weight:700;color:#6366f1;min-width:20px;text-align:right;"></span>
+                </div>
                 <div class="ws-toast-body">
                     <span style="color:var(--text);">${escapeHTML(evt.old_status_display)}</span>
                     <span style="color:#6366f1;"> → </span>
                     <span style="color:var(--text);font-weight:600;">${escapeHTML(evt.new_status_display)}</span><br>
                     <span style="font-size:11px;">👤 ${escapeHTML(evt.worker)} · ${escapeHTML(evt.timestamp)}</span>
-                </div>`;
+                </div>
+                <div class="ws-toast-devices"></div>`;
             container.appendChild(toast);
-
-            // Показать
             requestAnimationFrame(() => toast.classList.add('show'));
-            // Убрать через 5 сек
-            setTimeout(() => {
+
+            const timer = setTimeout(() => {
                 toast.classList.add('hide');
-                setTimeout(() => toast.remove(), 400);
+                setTimeout(() => {
+                    if (toast.parentElement) toast.remove();
+                    delete _toastGroups[groupKey];
+                }, 400);
             }, 5000);
+
+            _toastGroups[groupKey] = { el: toast, count: 1, timer };
         }
 
         // ─── Simple Toast (для не-device событий) ───
