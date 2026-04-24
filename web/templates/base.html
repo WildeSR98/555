@@ -49,9 +49,16 @@
                     <span style="font-size:10px; opacity:.7;">LIVE</span>
                 </span>
             </div>
-            <div class="user-info">
-                <div class="user-name">{{ user.full_name or user.username }}</div>
-                <div class="user-role">{{ user.role_display }}</div>
+            <div class="user-info" style="display:flex; align-items:center; justify-content:space-between;">
+                <div>
+                    <div class="user-name">{{ user.full_name or user.username }}</div>
+                    <div class="user-role">{{ user.role_display }}</div>
+                </div>
+                <button id="toastToggleBtn" title="Уведомления"
+                    onclick="toggleToastNotifications()"
+                    style="background:none; border:none; cursor:pointer; font-size:18px;
+                           padding:4px; border-radius:6px; transition:.2s;
+                           opacity:.8; line-height:1;">🔔</button>
             </div>
             <a href="/logout" class="logout-btn">🚪 Выход</a>
         </div>
@@ -187,11 +194,30 @@
             ws.onerror = () => ws.close();
         }
 
-        // ─── Toast (с группировкой по посту) ───
+        // ─── Toast notifications toggle ───
+        const _TOAST_KEY = 'toast_enabled_{{ user.username }}';
+        let _toastsEnabled = localStorage.getItem(_TOAST_KEY) !== 'false';
+
+        function _updateToastBtn() {
+            const btn = document.getElementById('toastToggleBtn');
+            if (!btn) return;
+            btn.textContent  = _toastsEnabled ? '🔔' : '🔕';
+            btn.title        = _toastsEnabled ? 'Уведомления включены (нажмите чтобы отключить)'
+                                              : 'Уведомления отключены (нажмите чтобы включить)';
+            btn.style.opacity = _toastsEnabled ? '0.85' : '0.45';
+        }
+        window.toggleToastNotifications = function() {
+            _toastsEnabled = !_toastsEnabled;
+            localStorage.setItem(_TOAST_KEY, _toastsEnabled);
+            _updateToastBtn();
+        };
+        document.addEventListener('DOMContentLoaded', _updateToastBtn);
+
         // Храним активные тосты-группы: ключ = worker|new_status
         const _toastGroups = {};
 
         function showToast(evt) {
+            if (!_toastsEnabled) return;
             const container = document.getElementById('ws-toast-container');
             if (!container) return;
 
@@ -266,6 +292,7 @@
 
         // ─── Simple Toast (для не-device событий) ───
         function showSimpleToast(title, body, color) {
+            if (!_toastsEnabled) return;
             const container = document.getElementById('ws-toast-container');
             if (!container) return;
             const toast = document.createElement('div');
