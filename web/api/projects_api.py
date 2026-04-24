@@ -74,7 +74,7 @@ def _compute_project_stats(devices: list) -> dict:
 
 class ManualMacEntry(BaseModel):
     mac1: str = ''   # LAN
-    mac2: str = ''   # iDRAC/BMC (только для TIOGA/SERVAL/OCTOPUS)
+    mac2: str = ''   # BMC (только для TIOGA/SERVAL/OCTOPUS)
 
 
 class DeviceRowInput(BaseModel):
@@ -386,7 +386,7 @@ async def create_project(
                             mac_rec2.device_id = new_device.id
                             mac2_val = mac_rec2.mac
                         else:
-                            mac_warnings.append(f'Нет свободных IDRAC MAC для {new_sn_str}')
+                            mac_warnings.append(f'Нет свободных BMC MAC для {new_sn_str}')
 
                 # Собираем данные для Excel (только устройства с MAC)
                 if needs_mac1:

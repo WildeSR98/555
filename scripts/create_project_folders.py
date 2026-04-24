@@ -151,7 +151,7 @@ def create_project_excel(project_name: str, devices: list) -> dict:
         thin_border  = Border(left=thin, right=thin, top=thin, bottom=thin)
         alt_fill     = PatternFill('solid', fgColor='DCE6F1')
 
-        headers    = ['PN', 'SN', 'MAC1 (LAN)', 'MAC2 (iDRAC/BMC)']
+        headers    = ['PN', 'SN', 'MAC1 (LAN)', 'MAC2 (BMC)']
         col_widths = [22, 22, 22, 22]
 
         for col, (h, w) in enumerate(zip(headers, col_widths), start=1):

@@ -97,7 +97,7 @@ def add_mac_manual(
     if not mac:
         raise HTTPException(400, f'Неверный формат MAC: {data.mac!r}')
     if data.mac_type.upper() not in ('LAN', 'IDRAC'):
-        raise HTTPException(400, 'mac_type должен быть LAN или IDRAC')
+        raise HTTPException(400, 'mac_type должен быть LAN или IDRAC (BMC)')
     if db.query(MacAddress).filter_by(mac=mac).first():
         raise HTTPException(400, f'MAC {mac} уже существует в пуле')
     db.add(MacAddress(mac=mac, mac_type=data.mac_type.upper(), is_used=False, created_at=datetime.now()))
@@ -118,7 +118,7 @@ async def import_macs_from_file(
         | MAC               | Тип   |
         |-------------------|-------|
         | AA:BB:CC:DD:EE:01 | LAN   |
-        | AA:BB:CC:DD:EE:02 | IDRAC |
+        | AA:BB:CC:DD:EE:02 | BMC   |
 
     CSV-формат: mac,type  (через запятую или точку с запятой)
     """

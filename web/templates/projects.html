@@ -501,7 +501,7 @@ async function loadMacStats() {
         const d = await r.json();
         _macStats = {lan_free: d.lan.free, idrac_free: d.idrac.free};
         const el = document.getElementById('macPoolStats');
-        if (el) el.innerHTML = `🔵 Пул MAC — свободно: <b>LAN: ${d.lan.free}</b> | <b>iDRAC: ${d.idrac.free}</b>`;
+        if (el) el.innerHTML = `🔵 Пул MAC — свободно: <b>LAN: ${d.lan.free}</b> | <b>BMC: ${d.idrac.free}</b>`;
     } catch(e) {}
 }
 
@@ -541,7 +541,7 @@ function _buildMacInputs(container, qty, dualMac) {
             <input type="text" class="manual-mac1-val" placeholder="MAC1 (LAN)"
                 style="flex:1; padding:6px 8px; border-radius:4px; border:1px solid var(--border);
                        background:var(--card-bg); color:var(--text); font-family:monospace; font-size:12px;">
-            ${dualMac ? `<input type="text" class="manual-mac2-val" placeholder="MAC2 (iDRAC/BMC)"
+            ${dualMac ? `<input type="text" class="manual-mac2-val" placeholder="MAC2 (BMC)"
                 style="flex:1; padding:6px 8px; border-radius:4px; border:1px solid var(--border);
                        background:var(--card-bg); color:var(--text); font-family:monospace; font-size:12px;">` : ''}
         `;
