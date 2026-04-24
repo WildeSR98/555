@@ -27,3 +27,11 @@ Thumbs.db
 
 # Chat logs
 *.txt
+
+# App logs
+logs/
+
+# DB backups
+backups/
+dump.sql
+*.dump

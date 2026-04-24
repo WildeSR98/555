@@ -82,7 +82,7 @@ class User(Base):
     ROLE_SHOP_MANAGER = 'SHOP_MANAGER'
     ROLE_EMPLOYEE = 'EMPLOYEE'
     ROLE_WORKER = 'WORKER'
-    ROLE_ROOT = 'ROOT'  # Скрытая системная рольь, не отображается в UI
+    ROLE_ROOT = 'ROOT'  # Скрытая системная роль, не отображается в UI
 
     ROLE_DISPLAY = {
         'ADMIN': 'Администратор',
@@ -302,7 +302,7 @@ class Device(Base):
         'TECH_CONTROL_2_1': 'Тех. контроль 2.1',
         'WAITING_TECH_CONTROL_2_2': 'Ожидание ОТК 2.2',
         'TECH_CONTROL_2_2': 'Тех. контроль 2.2',
-        'QC_PASSED': 'Контроль пройден',
+
         'DEFECT': 'Брак', 'WAITING_PARTS': 'Ожидание запчастей',
         'WAITING_SOFTWARE': 'Ожидание ПО',
         'WAITING_PACKING': 'Ожидание упаковки',
@@ -477,6 +477,7 @@ class Workplace(Base):
         'TECH_CONTROL_2_2': 'Тех. контроль 2.2',
         'FUNC_CONTROL': 'Функц. контроль',
         'PACKING': 'Упаковка', 'ACCOUNTING': 'Учёт',
+        'WAREHOUSE': 'Склад',
         'REPAIR': 'Ремонтный стенд', 'WAITING_POOL': 'Пул ожидания',
     }
 
@@ -721,8 +722,7 @@ class MacAddress(Base):
     """Пул MAC-адресов устройств.
 
     mac_type:
-      'LAN'   — встроенный сетевой интерфейс
-      'IDRAC' — iDRAC / BMC (только для TIOGA, SERVAL, OCTOPUS)
+      'LAN' — встроенный сетевой интерфейс
     """
     __tablename__ = 'pm_mac_address'
 

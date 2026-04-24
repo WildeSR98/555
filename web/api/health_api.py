@@ -33,7 +33,7 @@ def get_health(db: Session = Depends(get_db)):
         free_gb = free / (2**30)
         if free_gb < 0.5: # Менее 500 МБ
             status["storage"] = "LOW_SPACE"
-            logger.warn(f"Health check: Low disk space ({free_gb:.2f} GB free)")
+            logger.warning(f"Health check: Low disk space ({free_gb:.2f} GB free)")
         status["free_space_gb"] = round(free_gb, 2)
     except Exception as e:
         logger.error(f"Health check: Could not check disk usage. Error: {e}")

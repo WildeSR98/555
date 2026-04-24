@@ -81,14 +81,6 @@ class WorkflowEngine:
             if new_status not in allowed:
                 return False, f"Нарушение маршрута: после {device.status_display} нельзя {Device.STATUS_DISPLAY.get(new_status, new_status)}."
 
-        # После Сборки — только Вибро (или Ремонт/Брак)
-        if old_status == 'ASSEMBLY' and new_status not in ['WAITING_VIBROSTAND', 'VIBROSTAND', 'REPAIR', 'DEFECT']:
-             return False, "После сборки устройство должно идти только на Вибростенд."
-
-        # После Вибро — только ОТК (или Ремонт/Брак)
-        if old_status == 'VIBROSTAND' and new_status not in ['WAITING_TECH_CONTROL_1_1', 'WAITING_TECH_CONTROL_1_2', 'TECH_CONTROL_1_1', 'TECH_CONTROL_1_2', 'REPAIR', 'DEFECT']:
-             return False, "После вибростенда устройство должно идти только на Тех. контроль (ОТК)."
-
         return True, ""
 
     @staticmethod

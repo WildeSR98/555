@@ -40,7 +40,7 @@ def require_admin(user: User = Depends(get_current_user)):
 
 def require_manager(user: User = Depends(get_current_user)):
     """Проверяет, является ли пользователь менеджером или админом (Синхронно)."""
-    if user.role not in (User.ROLE_ADMIN, User.ROLE_MANAGER, 'SHOP_MANAGER'):
+    if user.role not in (User.ROLE_ADMIN, User.ROLE_ROOT, User.ROLE_MANAGER, 'SHOP_MANAGER'):
         raise HTTPException(status_code=403, detail="Forbidden: Manager access required")
     return user
 

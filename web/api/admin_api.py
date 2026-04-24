@@ -47,7 +47,7 @@ class UserUpdate(BaseModel):
 
 
 @router.get("/users")
-def get_users(db: Session = Depends(get_db)):
+def get_users(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Получить всех пользователей (root скрыт)."""
     users = db.query(User).filter(User.role != 'ROOT').order_by(User.date_joined.desc()).all()
     
@@ -68,8 +68,11 @@ def get_users(db: Session = Depends(get_db)):
 
 
 @router.post("/users")
-def create_user(data: UserCreate, db: Session = Depends(get_db)):
-    """Создать нового пользователя."""
+def create_user(data: UserCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Создать нового пользователя. Только ADMIN/ROOT."""
+    if current_user.role not in (User.ROLE_ADMIN, User.ROLE_ROOT):
+        raise HTTPException(403, "Недостаточно прав для создания пользователей")
+
     if not data.username or not data.password:
         raise HTTPException(400, "Логин и пароль обязательны")
 
@@ -92,8 +95,10 @@ def create_user(data: UserCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/users/{user_id}")
-def update_user(user_id: int, data: UserUpdate, db: Session = Depends(get_db)):
-    """Редактировать пользователя."""
+def update_user(user_id: int, data: UserUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Редактировать пользователя. Только ADMIN/ROOT."""
+    if current_user.role not in (User.ROLE_ADMIN, User.ROLE_ROOT):
+        raise HTTPException(403, "Недостаточно прав для редактирования пользователей")
     user = db.query(User).get(user_id)
     if not user or user.role == 'ROOT':
         raise HTTPException(404, "Пользователь не найден")
@@ -112,8 +117,10 @@ def update_user(user_id: int, data: UserUpdate, db: Session = Depends(get_db)):
 
 
 @router.post("/users/{user_id}/toggle-active")
-def toggle_user_active(user_id: int, db: Session = Depends(get_db)):
-    """Блокировка / Разблокировка пользователя."""
+def toggle_user_active(user_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Блокировка / Разблокировка пользователя. Только ADMIN/ROOT."""
+    if current_user.role not in (User.ROLE_ADMIN, User.ROLE_ROOT):
+        raise HTTPException(403, "Недостаточно прав для блокировки пользователей")
     user = db.query(User).get(user_id)
     if not user or user.role == 'ROOT':
         raise HTTPException(404, "Пользователь не найден")

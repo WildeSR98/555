@@ -210,7 +210,7 @@ async def import_macs_from_file(
 
     content = await file.read()
     filename = (file.filename or '').lower()
-    rows: list[tuple[str, str]] = []   # [(mac_raw, type_raw)]
+    rows: list[str] = []   # [mac_raw]
 
     if filename.endswith('.xlsx') or filename.endswith('.xls'):
         try:
@@ -238,11 +238,11 @@ async def import_macs_from_file(
 
     added = skipped_dup = skipped_bad = 0
     for mac_raw in rows:
+        if mac_raw.upper() in ('MAC', 'MAC ADDRESS', 'ADDRESS'):
+            continue
         mac = normalize_mac(mac_raw)
         if not mac:
             skipped_bad += 1
-            continue
-        if mac_raw.upper() in ('MAC', 'MAC ADDRESS', 'ADDRESS'):
             continue
         if db.query(MacAddress).filter_by(mac=mac).first():
             skipped_dup += 1

@@ -133,6 +133,8 @@ def _assign_manual_mac(db: Session, raw: str, device_id: int) -> str | None:
     elif not existing.is_used:
         existing.is_used   = True
         existing.device_id = device_id
+    elif existing.device_id != device_id:
+        raise ValueError(f"MAC {mac_val} уже используется устройством #{existing.device_id}")
     return mac_val
 
 
@@ -468,10 +470,6 @@ async def create_project(
             _mod  = _ilu.module_from_spec(_spec)
             _spec.loader.exec_module(_mod)
 
-            net_devices = [
-                {'part_number': d.part_number, 'serial_number': d.serial_number}
-                for d in new_proj.devices
-            ]
             folder_result = _mod.create_project_folders(
                 project_name=new_proj.name,
                 devices=[
