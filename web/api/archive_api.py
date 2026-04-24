@@ -180,4 +180,38 @@ def archive_project(
     project.updated_at = datetime.now()
     db.commit()
     forced_tag = " (принудительно)" if data.force else ""
-    return {"ok": True, "message": f"Проект «{project.name}» перемещён в архив{forced_tag}"}
+
+    # ── Перемещение папки проекта в архив на сетевом диске ──────────────────
+    net_msg = ""
+    try:
+        import os, shutil
+        from pathlib import Path
+
+        net_base = os.environ.get('NET_PROJECTS_DIR', '')
+        if net_base:
+            src_folder = Path(net_base) / project.name
+            archive_folder = Path(net_base) / 'Архив'
+            dst_folder = archive_folder / project.name
+
+            if src_folder.exists():
+                archive_folder.mkdir(parents=True, exist_ok=True)
+                if dst_folder.exists():
+                    # Папка уже есть в архиве — добавляем timestamp
+                    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    dst_folder = archive_folder / f"{project.name}_{ts}"
+                shutil.move(str(src_folder), str(dst_folder))
+                net_msg = f"Папка проекта перемещена в Архив: {dst_folder}"
+            else:
+                net_msg = f"Папка проекта не найдена на сетевом диске: {src_folder}"
+        else:
+            net_msg = "NET_PROJECTS_DIR не задан — папка не перемещена"
+    except Exception as _e:
+        import logging as _log
+        _log.getLogger(__name__).warning(f"[NET] Ошибка перемещения папки в архив: {_e}")
+        net_msg = f"Ошибка перемещения папки: {_e}"
+
+    return {
+        "ok": True,
+        "message": f"Проект «{project.name}» перемещён в архив{forced_tag}",
+        "net_message": net_msg,
+    }
