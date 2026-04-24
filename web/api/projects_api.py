@@ -72,6 +72,70 @@ def _compute_project_stats(devices: list) -> dict:
     }
 
 
+# ── MAC helpers ───────────────────────────────────────────────────────────────
+
+import re as _re
+
+
+def _norm_mac(raw: str) -> str | None:
+    """Нормализует MAC-адрес: убирает разделители, приводит к XX:XX:XX:XX:XX:XX."""
+    d = _re.sub(r'[^0-9a-fA-F]', '', raw.strip())
+    return ':'.join(d[j:j+2].upper() for j in range(0, 12, 2)) if len(d) == 12 else None
+
+
+def _mac_to_int(mac: str) -> int:
+    return int(mac.replace(':', ''), 16)
+
+
+def _int_to_mac(n: int) -> str:
+    h = f'{n:012X}'
+    return ':'.join(h[i:i+2] for i in range(0, 12, 2))
+
+
+def _next_free_mac(db: Session, device_id: int) -> str:
+    """
+    Берёт следующий свободный MAC из пула (если есть),
+    иначе генерирует новый = последний MAC в БД + 1.
+    Raises ValueError если пул полностью пуст (нет якоря).
+    """
+    # 1. Попытка взять из свободных
+    rec = db.query(MacAddress).filter_by(is_used=False).order_by(MacAddress.id).first()
+    if rec:
+        rec.is_used   = True
+        rec.device_id = device_id
+        return rec.mac
+
+    # 2. Генерация: якорь = последний MAC в БД (по id desc)
+    last = db.query(MacAddress).order_by(MacAddress.id.desc()).first()
+    if last is None:
+        raise ValueError('MAC-пул пуст. Добавьте хотя бы один MAC вручную как якорь.')
+
+    new_mac = _int_to_mac(_mac_to_int(last.mac) + 1)
+    # Коллизия (крайне маловероятна)
+    while db.query(MacAddress).filter_by(mac=new_mac).first():
+        new_mac = _int_to_mac(_mac_to_int(new_mac) + 1)
+
+    db.add(MacAddress(mac=new_mac, mac_type='LAN', is_used=True,
+                      device_id=device_id, created_at=datetime.now()))
+    db.flush()
+    return new_mac
+
+
+def _assign_manual_mac(db: Session, raw: str, device_id: int) -> str | None:
+    """Назначает вручную введённый MAC (создаёт запись в пуле если нет)."""
+    mac_val = _norm_mac(raw) if raw else None
+    if not mac_val:
+        return None
+    existing = db.query(MacAddress).filter_by(mac=mac_val).first()
+    if not existing:
+        db.add(MacAddress(mac=mac_val, mac_type='LAN', is_used=True,
+                          device_id=device_id, created_at=datetime.now()))
+    elif not existing.is_used:
+        existing.is_used   = True
+        existing.device_id = device_id
+    return mac_val
+
+
 class ManualMacEntry(BaseModel):
     mac1: str = ''   # LAN
     mac2: str = ''   # BMC (только для TIOGA/SERVAL/OCTOPUS)
@@ -337,62 +401,6 @@ async def create_project(
                     ))
 
                 # ── Назначение MAC-адресов ──────────────────────────────────
-                import re as _re
-                def _norm_mac(raw: str) -> str | None:
-                    d = _re.sub(r'[^0-9a-fA-F]', '', raw.strip())
-                    return ':'.join(d[j:j+2].upper() for j in range(0, 12, 2)) if len(d) == 12 else None
-
-                def _mac_to_int(mac: str) -> int:
-                    return int(mac.replace(':', ''), 16)
-
-                def _int_to_mac(n: int) -> str:
-                    h = f'{n:012X}'
-                    return ':'.join(h[i:i+2] for i in range(0, 12, 2))
-
-                def _next_free_mac(db, device_id):
-                    """
-                    Берёт следующий свободный MAC из пула (если есть),
-                    иначе генерирует новый = последний MAC в БД + 1.
-                    """
-                    # 1. Попытка взять из свободных
-                    rec = db.query(MacAddress).filter_by(is_used=False).order_by(MacAddress.id).first()
-                    if rec:
-                        rec.is_used   = True
-                        rec.device_id = device_id
-                        return rec.mac
-
-                    # 2. Генерация: якорь = последний MAC в БД (по id desc)
-                    last = db.query(MacAddress).order_by(MacAddress.id.desc()).first()
-                    if last:
-                        new_mac = _int_to_mac(_mac_to_int(last.mac) + 1)
-                    else:
-                        # Нет вообще ни одного MAC — начинаем с заглушки (должны настроить якорь вручную)
-                        raise ValueError('MAC-пул пуст. Добавьте хотя бы один MAC вручную как якорь.')
-
-                    # Проверка коллизии (крайне маловероятна, но на всякий)
-                    while db.query(MacAddress).filter_by(mac=new_mac).first():
-                        new_mac = _int_to_mac(_mac_to_int(new_mac) + 1)
-
-                    new_rec = MacAddress(mac=new_mac, mac_type='LAN', is_used=True,
-                                        device_id=device_id, created_at=datetime.now())
-                    db.add(new_rec)
-                    db.flush()   # получаем id без commit
-                    return new_mac
-
-                def _assign_manual_mac(db, raw: str, device_id):
-                    """Назначает вручную введённый MAC (создаёт если нет в пуле)."""
-                    mac_val = _norm_mac(raw) if raw else None
-                    if not mac_val:
-                        return None
-                    existing = db.query(MacAddress).filter_by(mac=mac_val).first()
-                    if not existing:
-                        db.add(MacAddress(mac=mac_val, mac_type='LAN', is_used=True,
-                                          device_id=device_id, created_at=datetime.now()))
-                    elif not existing.is_used:
-                        existing.is_used   = True
-                        existing.device_id = device_id
-                    return mac_val
-
                 mac1_val = mac2_val = None
 
                 if needs_mac1:
