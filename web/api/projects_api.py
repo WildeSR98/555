@@ -342,51 +342,48 @@ async def create_project(
                     d = _re.sub(r'[^0-9a-fA-F]', '', raw.strip())
                     return ':'.join(d[j:j+2].upper() for j in range(0, 12, 2)) if len(d) == 12 else None
 
+                def _next_free_mac(db, device_id):
+                    """Берёт следующий свободный MAC из пула по порядку (id asc)."""
+                    rec = db.query(MacAddress).filter_by(is_used=False).order_by(MacAddress.id).first()
+                    if rec:
+                        rec.is_used   = True
+                        rec.device_id = device_id
+                        return rec.mac
+                    return None
+
+                def _assign_manual_mac(db, raw: str, device_id):
+                    """Назначает вручную введённый MAC (создаёт если нет в пуле)."""
+                    mac_val = _norm_mac(raw) if raw else None
+                    if not mac_val:
+                        return None
+                    existing = db.query(MacAddress).filter_by(mac=mac_val).first()
+                    if not existing:
+                        db.add(MacAddress(mac=mac_val, mac_type='LAN', is_used=True,
+                                          device_id=device_id, created_at=datetime.now()))
+                    elif not existing.is_used:
+                        existing.is_used   = True
+                        existing.device_id = device_id
+                    return mac_val
+
                 mac1_val = mac2_val = None
 
                 if needs_mac1:
                     if row.mac_mode == 'manual' and i < len(row.manual_macs):
-                        mac1_raw = row.manual_macs[i].mac1
-                        mac1_val = _norm_mac(mac1_raw) if mac1_raw else None
-                        if mac1_val:
-                            # Создаём запись или берём существующую свободную
-                            existing = db.query(MacAddress).filter_by(mac=mac1_val).first()
-                            if not existing:
-                                db.add(MacAddress(mac=mac1_val, mac_type='LAN', is_used=True,
-                                                  device_id=new_device.id, created_at=datetime.now()))
-                            elif not existing.is_used:
-                                existing.is_used = True
-                                existing.device_id = new_device.id
+                        mac1_val = _assign_manual_mac(db, row.manual_macs[i].mac1, new_device.id)
                     else:
-                        # Из пула
-                        mac_rec = db.query(MacAddress).filter_by(mac_type='LAN', is_used=False).first()
-                        if mac_rec:
-                            mac_rec.is_used = True
-                            mac_rec.device_id = new_device.id
-                            mac1_val = mac_rec.mac
-                        else:
-                            mac_warnings.append(f'Нет свободных LAN MAC для {new_sn_str}')
+                        # Берём следующий из пула по порядку
+                        mac1_val = _next_free_mac(db, new_device.id)
+                        if mac1_val is None:
+                            mac_warnings.append(f'Нет свободных MAC для {new_sn_str} (MAC1)')
 
                 if needs_mac2:
                     if row.mac_mode == 'manual' and i < len(row.manual_macs):
-                        mac2_raw = row.manual_macs[i].mac2
-                        mac2_val = _norm_mac(mac2_raw) if mac2_raw else None
-                        if mac2_val:
-                            existing2 = db.query(MacAddress).filter_by(mac=mac2_val).first()
-                            if not existing2:
-                                db.add(MacAddress(mac=mac2_val, mac_type='IDRAC', is_used=True,
-                                                  device_id=new_device.id, created_at=datetime.now()))
-                            elif not existing2.is_used:
-                                existing2.is_used = True
-                                existing2.device_id = new_device.id
+                        mac2_val = _assign_manual_mac(db, row.manual_macs[i].mac2, new_device.id)
                     else:
-                        mac_rec2 = db.query(MacAddress).filter_by(mac_type='IDRAC', is_used=False).first()
-                        if mac_rec2:
-                            mac_rec2.is_used = True
-                            mac_rec2.device_id = new_device.id
-                            mac2_val = mac_rec2.mac
-                        else:
-                            mac_warnings.append(f'Нет свободных BMC MAC для {new_sn_str}')
+                        # Следующий за MAC1
+                        mac2_val = _next_free_mac(db, new_device.id)
+                        if mac2_val is None:
+                            mac_warnings.append(f'Нет свободных MAC для {new_sn_str} (MAC2)')
 
                 # Собираем данные для Excel (только устройства с MAC)
                 if needs_mac1:

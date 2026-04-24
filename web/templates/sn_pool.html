@@ -61,14 +61,14 @@
 
 <!-- MAC Panel -->
 <div id="macPanel" style="display:none; flex-direction:column; gap:16px;">
-    <!-- Stats: показываем только LAN (= кол-во пар) -->
+    <!-- Stats: плоский список -->
     <div class="card" style="display:flex; gap:30px; align-items:center; padding:16px 24px; flex-wrap:wrap;">
         <div>
-            <div style="font-size:12px; color:var(--text-muted);">LAN — всего (пар)</div>
+            <div style="font-size:12px; color:var(--text-muted);">MAC — всего</div>
             <div id="macStatLanTotal" style="font-size:28px; font-weight:800;">—</div>
         </div>
         <div>
-            <div style="font-size:12px; color:#22c55e;">LAN — свободно</div>
+            <div style="font-size:12px; color:#22c55e;">MAC — свободно</div>
             <div id="macStatLanFree" style="font-size:28px; font-weight:800; color:#22c55e;">—</div>
         </div>
         <div style="margin-left:auto; display:flex; gap:8px;">
@@ -109,8 +109,8 @@
                     <tr>
                         <th>Устройство (SN)</th>
                         <th>Проект</th>
-                        <th>LAN MAC</th>
-                        <th>BMC MAC</th>
+                        <th>MAC1</th>
+                        <th>MAC2</th>
                         <th>Дата</th>
                         <th>Статус</th>
                     </tr>
@@ -625,21 +625,21 @@ async function loadMacList() {
             const statusBadge = r.is_used
                 ? '<span class="badge badge-success">Использован</span>'
                 : '<span class="badge">Свободен</span>';
-            const lanCode = r.lan_mac
-                ? `<code style="color:#22c55e;">${escapeHTML(r.lan_mac)}</code>`
+            const mac1Code = r.mac1
+                ? `<code style="color:#22c55e;">${escapeHTML(r.mac1)}</code>`
                 : '<span class="text-muted">—</span>';
-            const bmcCode = r.bmc_mac
-                ? `<code style="color:#3b82f6;">${escapeHTML(r.bmc_mac)}</code>`
+            const mac2Code = r.mac2
+                ? `<code style="color:#6366f1;">${escapeHTML(r.mac2)}</code>`
                 : '<span class="text-muted">—</span>';
-            const delBtn = !r.is_used && r.lan_id
+            const delBtn = !r.is_used && r.mac1_id
                 ? `<button class="btn btn-danger" style="padding:2px 8px;font-size:11px;"
-                       onclick="deleteMacPair(${r.lan_id || 'null'},${r.bmc_id || 'null'})">🗑</button>`
+                       onclick="deleteMacPair(${r.mac1_id ?? 'null'},${r.mac2_id ?? 'null'})">🗑</button>`
                 : '';
             return `<tr>
                 <td><code>${escapeHTML(r.device_sn || '—')}</code></td>
                 <td>${escapeHTML(r.project_name || '—')}</td>
-                <td>${lanCode}</td>
-                <td>${bmcCode}</td>
+                <td>${mac1Code}</td>
+                <td>${mac2Code}</td>
                 <td>${escapeHTML(r.created_at || '—')}</td>
                 <td>${statusBadge} ${delBtn}</td>
             </tr>`;
@@ -687,10 +687,10 @@ async function importMacFile(input) {
     input.value = '';
 }
 
-async function deleteMacPair(lanId, bmcId) {
-    if (!confirm('Удалить пару MAC (LAN + BMC) из пула?')) return;
+async function deleteMacPair(id1, id2) {
+    if (!confirm('Удалить MAC из пула?')) return;
     try {
-        const delIds = [lanId, bmcId].filter(id => id && id !== 'null');
+        const delIds = [id1, id2].filter(id => id && id !== 'null');
         for (const id of delIds) {
             await fetch(`/api/mac-pool/${id}`, {method: 'DELETE'});
         }
