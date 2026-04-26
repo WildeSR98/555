@@ -193,6 +193,7 @@ let state = {
     workplaceType: null,
     batchLimit: 1,
     stageTimerSeconds: 300,  // таймер этапа (из маршрутного листа)
+    timerStartedAt: null,    // timestamp начала таймера (для восстановления)
     devices: [],          // {id, sn, name, status, needScanIn}
     phase: 'accept',      // 'accept' — нужно принять в работу, 'action' — можно закрывать
     verifiedProjectIds: [],
@@ -243,6 +244,7 @@ function saveState() {
         workplaceName: state.workplaceName,
         lastFeedback: state.lastFeedback,
         stageTimerSeconds: state.stageTimerSeconds,
+        timerStartedAt: state.timerStartedAt,
     };
     try { sessionStorage.setItem(SCAN_STATE_KEY, JSON.stringify(toSave)); } catch(e) {}
 }
@@ -270,6 +272,7 @@ function restoreState() {
         state.workplaceName  = data.workplaceName || '';
         state.lastFeedback   = data.lastFeedback || null;
         state.stageTimerSeconds = data.stageTimerSeconds || 300;
+        state.timerStartedAt   = data.timerStartedAt || null;
 
         document.getElementById('lblWorker').textContent    = state.workerName;
         document.getElementById('lblWorkplace').textContent = state.workplaceName;
@@ -288,9 +291,10 @@ function restoreState() {
             showFeedback(state.lastFeedback.type, state.lastFeedback.text, true);
         }
 
-        // Если есть устройства в фазе action — перезапускаем таймер
+        // Если есть устройства в фазе action — восстанавливаем таймер
         if (state.phase === 'action' && state.devices.length > 0) {
-            startStageTimer(state.stageTimerSeconds);
+            // Запрашиваем актуальный таймер у сервера для устройства
+            _restoreTimerFromServer(data);
         }
 
         document.getElementById('snInput').focus();
@@ -299,6 +303,37 @@ function restoreState() {
         clearSavedState();
         return false;
     }
+}
+
+// ─── Восстановление таймера после перезагрузки ───────────────────────────────
+async function _restoreTimerFromServer(savedData) {
+    const deviceId = (state.devices && state.devices[0]) ? state.devices[0].id : null;
+    let timerSeconds = state.stageTimerSeconds || 300;
+
+    // Запрашиваем актуальный таймер из проектного маршрута через API
+    if (deviceId && state.workplaceType) {
+        try {
+            const resp = await fetch(`/api/scan/device-timer?device_id=${deviceId}&stage_key=${state.workplaceType}`);
+            if (resp.ok) {
+                const data = await resp.json();
+                if (data.timer_seconds) {
+                    timerSeconds = data.timer_seconds;
+                    state.stageTimerSeconds = timerSeconds;
+                }
+            }
+        } catch(e) {
+            console.warn('[Timer] Не удалось получить таймер с сервера:', e);
+        }
+    }
+
+    // Вычисляем сколько прошло с момента запуска таймера
+    let remaining = timerSeconds;
+    if (state.timerStartedAt) {
+        const elapsed = Math.floor((Date.now() - state.timerStartedAt) / 1000);
+        remaining = Math.max(0, timerSeconds - elapsed);
+    }
+
+    startStageTimer(timerSeconds, remaining);
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -1005,13 +1040,24 @@ function unlockActionButtons() {
     });
 }
 
-function startStageTimer(seconds) {
+function startStageTimer(seconds, resumeFromLeft) {
     stopStageTimer();
     _timerTotal = seconds;
-    _timerLeft  = seconds;
+    // Если resumeFromLeft задан — продолжаем с оставшегося времени
+    _timerLeft  = (resumeFromLeft !== undefined) ? resumeFromLeft : seconds;
+    // Сохраняем момент запуска (для восстановления после reload)
+    if (resumeFromLeft === undefined) {
+        state.timerStartedAt = Date.now();
+    }
+    saveState();
     _updateTimerDisplay();
     document.getElementById('stageTimerBox').style.display = 'block';
     const hint = document.getElementById('timerHint');
+    if (_timerLeft <= 0) {
+        // Таймер уже истёк — сразу показываем готово
+        stopStageTimer(true);
+        return;
+    }
     if (hint) hint.textContent = 'ожидайте...';
     lockActionButtons();  // ← блокируем на время таймера
     _timerInterval = setInterval(() => {

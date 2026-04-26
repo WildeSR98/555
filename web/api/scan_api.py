@@ -89,6 +89,60 @@ class EndSessionRequest(BaseModel):
     session_id: int = Field(..., gt=0)
 
 
+@router.get("/device-timer")
+def get_device_timer(
+    device_id: int,
+    stage_key: str,
+    db: Session = Depends(get_db),
+):
+    """Получить таймер этапа для конкретного устройства из проектного маршрута."""
+    device = db.query(Device).filter(Device.id == device_id).first()
+    if not device:
+        return {"timer_seconds": 300}
+
+    timer_val = 300
+
+    # 1. Сначала ищем в ProjectRouteStage проекта
+    if device.project_id:
+        pr_stage = (
+            db.query(ProjectRouteStage)
+            .filter_by(
+                project_id=device.project_id,
+                device_type=device.device_type,
+            )
+            .filter(ProjectRouteStage.stage_key == stage_key, ProjectRouteStage.is_enabled == True)
+            .first()
+        )
+        if pr_stage and pr_stage.timer_seconds:
+            timer_val = pr_stage.timer_seconds
+        else:
+            # Проверяем stage_key с :: суффиксами (дубликаты этапов)
+            pr_stages = (
+                db.query(ProjectRouteStage)
+                .filter_by(project_id=device.project_id, device_type=device.device_type)
+                .filter(ProjectRouteStage.is_enabled == True)
+                .all()
+            )
+            for s in pr_stages:
+                base_key = s.stage_key.split('::')[0] if '::' in s.stage_key else s.stage_key
+                if base_key == stage_key and s.timer_seconds:
+                    timer_val = s.timer_seconds
+                    break
+            else:
+                # 2. Фолбек на глобальный RouteConfig
+                rc = (
+                    db.query(RouteConfig).filter_by(device_type=device.device_type).first()
+                    or db.query(RouteConfig).filter_by(is_default=True).first()
+                )
+                if rc:
+                    for st in rc.stages:
+                        if st.stage_key == stage_key and st.is_enabled:
+                            timer_val = st.timer_seconds if st.timer_seconds else 300
+                            break
+
+    return {"timer_seconds": timer_val, "device_type": device.device_type, "project_id": device.project_id}
+
+
 @router.get("/workplaces")
 def get_workplaces(db: Session = Depends(get_db)):
     """Список активных рабочих мест."""
