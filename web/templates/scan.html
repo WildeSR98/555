@@ -866,6 +866,12 @@ async function doAction(actionName, notes = '', targetStatus = null) {
         if (resp.ok) {
             const res = await resp.json();
 
+            // Сервер вернул ok: false (cooldown, маршрут и т.д.) — показываем ошибку
+            if (res.ok === false) {
+                showFeedback('error', res.error || res.message || 'Операция отклонена');
+                return;
+            }
+
             if (actionName === 'scan_in') {
                 if (shouldAutoAdvance()) {
                     const statusMap = {};
