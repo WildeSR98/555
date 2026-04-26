@@ -1,72 +1,71 @@
 ---
 name: git-workflow
-description: Правила работы с Git — ветвление, коммиты, мерж в debug, защита main, автокоммит.
+description: Git workflow rules — branching, commits, merge to debug, main protection, auto-commit.
 ---
 
 # Git Workflow
 
-## Общие правила
+## General Rules
 
-- Хостинг: **GitHub**
-- Основная рабочая ветка: **debug** (сюда мержатся все фичи)
-- Продакшн-ветка: **main** (мерж из debug только после проверки)
-- **Прямой push в main ЗАПРЕЩЁН** — только через мерж из debug
+- Hosting: **GitHub**
+- Main working branch: **debug** (all features merge here)
+- Production branch: **main** (merge from debug only after verification)
+- **Direct push to main is FORBIDDEN** — only via merge from debug
 
 ---
 
-## 1. Конвенция именования веток
+## 1. Branch Naming Convention
 
-Формат: `тип/краткое-описание`
+Format: `type/short-description`
 
-| Префикс | Когда использовать | Пример |
+| Prefix | When to use | Example |
 |---|---|---|
-| `feature/` | Новая функциональность | `feature/mac-pool-import` |
-| `bugfix/` | Исправление бага | `bugfix/qc-passed-duplicate` |
-| `hotfix/` | Срочное исправление в проде | `hotfix/admin-auth-bypass` |
-| `refactor/` | Рефакторинг без изменения поведения | `refactor/workflow-cleanup` |
+| `feature/` | New functionality | `feature/mac-pool-import` |
+| `bugfix/` | Bug fix | `bugfix/qc-passed-duplicate` |
+| `hotfix/` | Urgent production fix | `hotfix/admin-auth-bypass` |
+| `refactor/` | Refactoring without behavior change | `refactor/workflow-cleanup` |
 
-Правила:
-- Только латиница, строчные буквы, дефисы
-- Максимально кратко, но понятно
-- Не использовать номера тикетов без описания
-
----
-
-## 2. Коммит-сообщения
-
-Формат: **что было → что стало** (кратко, по-русски или по-английски)
-
-```
-git commit -m "STATUS_DISPLAY: убран дубль QC_PASSED, оставлен только 'Склад (Завершено)'"
-git commit -m "admin_api: добавлена проверка прав ADMIN/ROOT в create_user, update_user, toggle_user_active"
-git commit -m "workflow: убраны дублирующие проверки ASSEMBLY/VIBROSTAND после STRICT_TRANSITIONS"
-git commit -m "dependencies: добавлен ROLE_ROOT в require_manager"
-```
-
-Правила:
-- Первое слово — файл или компонент (без расширения)
-- После двоеточия — что именно изменилось
-- Одна строка, до ~120 символов
-- Если много изменений в одном коммите — перечислить через запятую
+Rules:
+- Latin characters only, lowercase, hyphens
+- As brief as possible, but clear
+- Don't use ticket numbers without description
 
 ---
 
-## 3. Рабочий процесс
+## 2. Commit Messages
+
+Format: **component: what changed** (brief, in English or Russian)
+
+```
+git commit -m "workflow: dynamic cooldown from project route instead of hardcoded 5 min"
+git commit -m "admin_api: added ADMIN/ROOT role check in create_user, update_user, toggle_user_active"
+git commit -m "scan: restoreState now preserves timer across page reloads"
+```
+
+Rules:
+- First word — file or component (without extension)
+- After colon — what exactly changed
+- Single line, up to ~120 characters
+- If many changes in one commit — list separated by commas
+
+---
+
+## 3. Workflow
 
 ```
 1. git checkout debug
 2. git pull origin debug
-3. git checkout -b feature/название-фичи
-4. ... работа над кодом ...
+3. git checkout -b feature/feature-name
+4. ... work on code ...
 5. git add .
-6. git commit -m "компонент: что было → что стало"
-7. git push -u origin feature/название-фичи
+6. git commit -m "component: what changed"
+7. git push -u origin feature/feature-name
 8. git checkout debug
-9. git merge feature/название-фичи
+9. git merge feature/feature-name
 10. git push origin debug
 ```
 
-### Мерж в main (только после проверки debug)
+### Merge to main (only after debug verification)
 
 ```
 git checkout main
@@ -77,43 +76,43 @@ git push origin main
 
 ---
 
-## 4. Защита main
+## 4. Main Branch Protection
 
-- **НИКОГДА** не коммитить напрямую в main
-- **НИКОГДА** не делать `git push origin main` без предварительного мержа из debug
-- Если агент обнаруживает что текущая ветка — main, он должен:
-  1. Остановиться
-  2. Предупредить пользователя
-  3. Предложить создать ветку
-
----
-
-## 5. Конфликты
-
-При возникновении конфликтов агент должен:
-- **Остановиться** и не пытаться разрешать конфликты автоматически
-- **Показать** список конфликтующих файлов
-- **Показать** конкретные блоки конфликтов (`<<<<<<<`, `=======`, `>>>>>>>`)
-- **Предложить** варианты разрешения для каждого конфликта
-- Дождаться решения пользователя
+- **NEVER** commit directly to main
+- **NEVER** do `git push origin main` without prior merge from debug
+- If the agent detects current branch is main, it must:
+  1. Stop
+  2. Warn the user
+  3. Suggest creating a branch
 
 ---
 
-## 6. Автокоммит
+## 5. Conflicts
 
-Агент **всегда коммитит автоматически** после внесения изменений:
-- Группировать связанные изменения в один коммит (например, все фиксы аудита — один коммит)
-- Формировать осмысленное сообщение по формату из п.2
-- Делать `git add .` + `git commit` сразу после завершения задачи
-- Push делать только по запросу пользователя или в конце сессии
+When conflicts arise, the agent must:
+- **Stop** and not try to resolve conflicts automatically
+- **Show** the list of conflicting files
+- **Show** specific conflict blocks (`<<<<<<<`, `=======`, `>>>>>>>`)
+- **Suggest** resolution options for each conflict
+- Wait for user's decision
+
+---
+
+## 6. Auto-Commit
+
+The agent **always commits automatically** after making changes:
+- Group related changes into one commit (e.g., all audit fixes — one commit)
+- Form a meaningful message per format from section 2
+- Do `git add .` + `git commit` right after completing the task
+- Push only on user request or at session end
 
 ---
 
 ## 7. .gitignore
 
-В репозиторий НЕ должны попадать:
-- `.env` — секреты, пароли, ключи
-- `dump.sql` — дампы базы данных
-- `*.sql` дампы в корне проекта
+The repository must NOT contain:
+- `.env` — secrets, passwords, keys
+- `dump.sql` — database dumps
+- `*.sql` dumps in project root
 
-Если эти файлы ещё не в `.gitignore` — добавить перед первым коммитом.
+If these files are not yet in `.gitignore` — add them before the first commit.

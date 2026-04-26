@@ -1,58 +1,58 @@
 ---
 name: qt-tables
-description: Правила оформления QTableWidget в проекте Production Manager (PyQt6). Автоподгонка колонок под длину текста.
+description: QTableWidget styling standards for Production Manager (PyQt6). Auto-fit columns to text length.
 ---
 
-# Стандарт оформления таблиц (QTableWidget / QTreeWidget)
+# Table Styling Standard (QTableWidget / QTreeWidget)
 
-При создании или редактировании любой таблицы в проекте `appwin` **обязательно** соблюдать следующие правила.
+When creating or editing any table in the `appwin` project, these rules are **mandatory**.
 
-## 1. Каждая колонка должна иметь явный `setSectionResizeMode`
+## 1. Every column must have an explicit `setSectionResizeMode`
 
-Никогда не оставлять колонки без явного режима. Для **каждой** колонки нужно указать один из двух режимов:
+Never leave columns without an explicit mode. For **each** column, specify one of two modes:
 
 ```python
 hdr = self.table.horizontalHeader()
-hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # короткие данные
-hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)           # длинные данные
+hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # short data
+hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)           # long data
 ```
 
-## 2. Выбор режима
+## 2. Mode Selection
 
-| Режим | Когда использовать | Примеры колонок |
+| Mode | When to use | Example columns |
 | --- | --- | --- |
-| `ResizeToContents` | Короткий, фиксированный текст | ID, Код, Время, Дата, Действие, Статус, Роль |
-| `Stretch` | Длинный или переменный текст | Название, ФИО, SN устройства, Проект, Рабочее место, Описание |
+| `ResizeToContents` | Short, fixed-length text | ID, Code, Time, Date, Action, Status, Role |
+| `Stretch` | Long or variable-length text | Name, Full Name, Device SN, Project, Workplace, Description |
 
-## 3. Запрещено
+## 3. Forbidden
 
-- ❌ Использовать `Interactive` как единственный режим (текст обрезается).
-- ❌ Оставлять колонки без явного режима (размер по умолчанию слишком мал).
-- ❌ Ставить `Stretch` на все колонки (тогда короткие данные растягиваются избыточно).
+- ❌ Using `Interactive` as the only mode (text gets clipped).
+- ❌ Leaving columns without an explicit mode (default size is too small).
+- ❌ Setting `Stretch` on all columns (short data stretches excessively).
 
-## 4. Шаблон
+## 4. Template
 
 ```python
-# Пример: таблица с 5 колонками
+# Example: table with 5 columns
 self.table = QTableWidget()
 self.table.setColumnCount(5)
 self.table.setHorizontalHeaderLabels([
-    'ID', 'Логин', 'ФИО', 'Роль', 'Статус'
+    'ID', 'Login', 'Full Name', 'Role', 'Status'
 ])
 
 hdr = self.table.horizontalHeader()
 hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # ID
-hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)           # Логин
-hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)           # ФИО
-hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # Роль
-hdr.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # Статус
+hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)           # Login
+hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)           # Full Name
+hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # Role
+hdr.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # Status
 
 self.table.setAlternatingRowColors(True)
 self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
 self.table.verticalHeader().setVisible(False)
 ```
 
-## 5. Дополнительно
+## 5. Additional
 
-- Если в колонке размещается виджет (кнопки управления), используй `ResizeToContents`.
-- После заполнения данных можно вызвать `self.table.resizeRowsToContents()` для подгонки высоты строк.
+- If a column contains a widget (action buttons), use `ResizeToContents`.
+- After populating data, call `self.table.resizeRowsToContents()` to adjust row heights.
