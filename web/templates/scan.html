@@ -1137,20 +1137,25 @@ function _handleTimerWsUpdate(detail, source) {
     console.log(`[WS] Таймер обновлён (${source}): ${stageKey} → ${newTimer}s`);
     const label = `${Math.floor(newTimer/60)}:${String(newTimer%60).padStart(2,'0')}`;
 
-    // Если таймер активен (тикает) — пересчитываем оставшееся время
-    if (_timerInterval) {
-        // Считаем сколько прошло от старта
-        const elapsed = state.timerStartedAt
-            ? Math.floor((Date.now() - state.timerStartedAt) / 1000)
-            : (oldTimer - _timerLeft);
-        const remaining = Math.max(0, newTimer - elapsed);
+    // Считаем сколько прошло от старта таймера
+    const elapsed = state.timerStartedAt
+        ? Math.floor((Date.now() - state.timerStartedAt) / 1000)
+        : (_timerInterval ? (oldTimer - _timerLeft) : oldTimer);
+    const remaining = Math.max(0, newTimer - elapsed);
+
+    if (remaining <= 0) {
+        // Новый таймер уже истёк (прошло больше времени чем новый таймер)
+        // Просто обновляем отображение, кнопки остаются разблокированными
+        if (_timerInterval) {
+            // Таймер ещё тикал — останавливаем с done=true
+            startStageTimer(newTimer, 0);
+        }
+        // Если таймер уже был остановлен — ничего не делаем, кнопки уже доступны
+        showFeedback('info', `⏱ Таймер изменён на ${label} (уже истёк)`, true);
+    } else {
+        // Есть оставшееся время — перезапускаем с remaining
         startStageTimer(newTimer, remaining);
-        // Не сбрасываем timerStartedAt — таймер продолжает с того же момента
         showFeedback('info', `⏱ Таймер изменён на ${label}`, true);
-    } else if (state.phase === 'action' && state.devices.length > 0) {
-        // Таймер уже истёк, но мы ещё в работе — перезапускаем с новым значением
-        startStageTimer(newTimer);
-        showFeedback('info', `⏱ Новый таймер: ${label}`, true);
     }
 }
 
