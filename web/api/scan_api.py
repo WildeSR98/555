@@ -381,11 +381,40 @@ async def do_action(
                         enabled = rc.get_enabled_stages() if rc else []
                     new_status = resolve_next_status(old_status, enabled)
                 
-                # Проверка Workflow
+                # Проверка Workflow — cooldown из проектного маршрута
                 last_log = db.query(WorkLog).filter(WorkLog.device_id == device.id).order_by(WorkLog.created_at.desc()).first()
+
+                # Определяем cooldown (таймер) из проектного маршрута
+                cooldown_sec = None  # None = дефолт 5 мин
+                stage_key = old_status  # текущий этап (напр. ASSEMBLY)
+                if device.project_id and stage_key:
+                    pr_stage = (
+                        db.query(ProjectRouteStage)
+                        .filter_by(project_id=device.project_id, device_type=device.device_type)
+                        .filter(ProjectRouteStage.is_enabled == True)
+                        .all()
+                    )
+                    for ps in pr_stage:
+                        base_key = ps.stage_key.split('::')[0] if '::' in ps.stage_key else ps.stage_key
+                        if base_key == stage_key and ps.timer_seconds:
+                            cooldown_sec = ps.timer_seconds
+                            break
+                    if cooldown_sec is None:
+                        # Фолбек на глобальный маршрут
+                        rc = (
+                            db.query(RouteConfig).filter_by(device_type=device.device_type).first()
+                            or db.query(RouteConfig).filter_by(is_default=True).first()
+                        )
+                        if rc:
+                            for st in rc.stages:
+                                if st.stage_key == stage_key and st.is_enabled:
+                                    cooldown_sec = st.timer_seconds if st.timer_seconds else 300
+                                    break
+
                 ok, msg = WorkflowEngine.can_change_status(
                     device, new_status, current_user, last_log,
-                    cooldown_bypass_roles=get_cooldown_bypass_roles(db)
+                    cooldown_bypass_roles=get_cooldown_bypass_roles(db),
+                    cooldown_seconds=cooldown_sec,
                 )
                 if not ok:
                     return {"ok": False, "error": f"{device.serial_number}: {msg}"}

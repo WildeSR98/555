@@ -50,6 +50,7 @@ class WorkflowEngine:
         user: User, 
         last_log: Optional[WorkLog] = None,
         cooldown_bypass_roles: Optional[list] = None,
+        cooldown_seconds: Optional[int] = None,
     ) -> Tuple[bool, str]:
         """
         Проверка: можно ли перевести устройство в новый статус.
@@ -62,12 +63,15 @@ class WorkflowEngine:
         if user.role in _bypass:
             return True, ""
 
-        # 2. Проверка кулдауна (5 минут)
-        if last_log:
+        # 2. Проверка кулдауна (из таймера маршрута или дефолт 5 минут)
+        cd = cooldown_seconds if cooldown_seconds is not None else (WorkflowEngine.COOLDOWN_MINUTES * 60)
+        if last_log and cd > 0:
             time_passed = datetime.now() - last_log.created_at
-            if time_passed < timedelta(minutes=WorkflowEngine.COOLDOWN_MINUTES):
-                remaining = int(WorkflowEngine.COOLDOWN_MINUTES * 60 - time_passed.total_seconds())
-                return False, f"Смена статуса запрещена. Прошло меньше 5 минут (осталось {remaining} сек)."
+            if time_passed < timedelta(seconds=cd):
+                remaining = int(cd - time_passed.total_seconds())
+                m = remaining // 60
+                s = remaining % 60
+                return False, f"Ожидайте таймер. Осталось {m}:{s:02d}."
 
         # 3. Проверка логики переходов (Vlad's Logic)
         old_status = device.status
