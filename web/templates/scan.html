@@ -242,6 +242,7 @@ function saveState() {
         workerName: state.workerName,
         workplaceName: state.workplaceName,
         lastFeedback: state.lastFeedback,
+        stageTimerSeconds: state.stageTimerSeconds,
     };
     try { sessionStorage.setItem(SCAN_STATE_KEY, JSON.stringify(toSave)); } catch(e) {}
 }
@@ -300,7 +301,24 @@ document.addEventListener('DOMContentLoaded', () => {
         loadWorkplaces();
     }
     checkPrescan(restored);
+    startAutoCloseCheck();
 });
+
+// ─── Автозавершение смены в 5:00 утра ────────────────────────────────────────
+function startAutoCloseCheck() {
+    setInterval(() => {
+        if (!state.sessionId) return;
+        const now = new Date();
+        const h = now.getHours();
+        const m = now.getMinutes();
+        // Если время 05:00–05:05 — автоматически завершаем смену
+        if (h === 5 && m <= 5) {
+            console.log('[AutoClose] 05:00 — автоматическое завершение смены');
+            showFeedback('warning', '⏰ Смена автоматически завершена в 05:00');
+            endSession();
+        }
+    }, 60000); // проверяем каждую минуту
+}
 
 // Авто-заполнение SN из URL-параметра ?prescan=SN
 function checkPrescan(sessionActive) {
@@ -466,7 +484,6 @@ async function selectWorkplace(wpId) {
 
 async function endSession() {
     if (!state.sessionId) return;
-    if (!confirm('Завершить рабочую смену?')) return;
     
     try {
         await fetch('/api/scan/end-session', {
@@ -1046,6 +1063,28 @@ function _updateTimerDisplay() {
         label.style.color = '';
     }
 }
+
+// ─── Обновление таймера в реальном времени через WebSocket ───────────────────
+window.addEventListener('ws:route_saved', (e) => {
+    const detail = e.detail;
+    if (!state.sessionId || !state.workplaceType) return;
+    // stages — объект { STAGE_KEY: timer_seconds }
+    const stages = detail.stages;
+    if (!stages) return;
+    const stageKey = state.workplaceType;
+    if (stageKey in stages) {
+        const newTimer = stages[stageKey];
+        if (newTimer && newTimer !== state.stageTimerSeconds) {
+            state.stageTimerSeconds = newTimer;
+            console.log(`[WS] Таймер обновлён: ${stageKey} → ${newTimer}s`);
+            // Если таймер сейчас активен — перезапускаем с новым значением
+            if (_timerInterval) {
+                startStageTimer(newTimer);
+                showFeedback('info', `⏱ Таймер обновлён: ${Math.floor(newTimer/60)}:${String(newTimer%60).padStart(2,'0')}`, true);
+            }
+        }
+    }
+});
 
 </script>
 

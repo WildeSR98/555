@@ -731,9 +731,11 @@ class MacAddress(Base):
     mac_type   = Column(String(10), nullable=False)    # 'LAN' | 'IDRAC'
     is_used    = Column(Boolean, default=False, nullable=False)
     device_id  = Column(Integer, ForeignKey('tasks_device.id', ondelete='SET NULL'), nullable=True)
+    project_id = Column(Integer, ForeignKey('tasks_project.id', ondelete='SET NULL'), nullable=True)
     created_at = Column(DateTime)
 
-    device = relationship('Device', backref='mac_records')
+    device  = relationship('Device', backref='mac_records')
+    project = relationship('Project', backref='mac_records')
 
     def __repr__(self) -> str:
         return f"MacAddress({self.mac} {self.mac_type} used={self.is_used})"

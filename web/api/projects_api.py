@@ -92,7 +92,7 @@ def _int_to_mac(n: int) -> str:
     return ':'.join(h[i:i+2] for i in range(0, 12, 2))
 
 
-def _next_free_mac(db: Session, device_id: int) -> str:
+def _next_free_mac(db: Session, device_id: int, project_id: int = None) -> str:
     """
     Берёт следующий свободный MAC из пула (если есть),
     иначе генерирует новый = последний MAC в БД + 1.
@@ -101,8 +101,9 @@ def _next_free_mac(db: Session, device_id: int) -> str:
     # 1. Попытка взять из свободных
     rec = db.query(MacAddress).filter_by(is_used=False).order_by(MacAddress.id).first()
     if rec:
-        rec.is_used   = True
-        rec.device_id = device_id
+        rec.is_used    = True
+        rec.device_id  = device_id
+        rec.project_id = project_id
         return rec.mac
 
     # 2. Генерация: якорь = последний MAC в БД (по id desc)
@@ -116,12 +117,12 @@ def _next_free_mac(db: Session, device_id: int) -> str:
         new_mac = _int_to_mac(_mac_to_int(new_mac) + 1)
 
     db.add(MacAddress(mac=new_mac, mac_type='LAN', is_used=True,
-                      device_id=device_id, created_at=datetime.now()))
+                      device_id=device_id, project_id=project_id, created_at=datetime.now()))
     db.flush()
     return new_mac
 
 
-def _assign_manual_mac(db: Session, raw: str, device_id: int) -> str | None:
+def _assign_manual_mac(db: Session, raw: str, device_id: int, project_id: int = None) -> str | None:
     """Назначает вручную введённый MAC (создаёт запись в пуле если нет)."""
     mac_val = _norm_mac(raw) if raw else None
     if not mac_val:
@@ -129,10 +130,11 @@ def _assign_manual_mac(db: Session, raw: str, device_id: int) -> str | None:
     existing = db.query(MacAddress).filter_by(mac=mac_val).first()
     if not existing:
         db.add(MacAddress(mac=mac_val, mac_type='LAN', is_used=True,
-                          device_id=device_id, created_at=datetime.now()))
+                          device_id=device_id, project_id=project_id, created_at=datetime.now()))
     elif not existing.is_used:
-        existing.is_used   = True
-        existing.device_id = device_id
+        existing.is_used    = True
+        existing.device_id  = device_id
+        existing.project_id = project_id
     elif existing.device_id != device_id:
         raise ValueError(f"MAC {mac_val} уже используется устройством #{existing.device_id}")
     return mac_val
@@ -247,6 +249,18 @@ def get_entity_details(entity_type: str, entity_id: int, db: Session = Depends(g
         # Считаем статистику (теперь через len(project.devices), так как это список)
         devices_list = project.devices
         ps = _compute_project_stats(devices_list)
+        # Сетевая папка
+        import os as _os
+        from pathlib import Path as _P
+        net_base = _os.environ.get('NET_PROJECTS_DIR', '')
+        if net_base:
+            if project.status == 'ARCHIVED':
+                net_path = str(_P(net_base) / 'Archive' / project.name)
+            else:
+                net_path = str(_P(net_base) / project.name)
+        else:
+            net_path = '—'
+
         return {
             "title": f"📁 Проект: {project.name}",
             "stats": {
@@ -266,6 +280,7 @@ def get_entity_details(entity_type: str, entity_id: int, db: Session = Depends(g
                 {"label": "Менеджер",       "value": project.manager.full_name if project.manager else "—"},
                 {"label": "Создан",         "value": project.created_at.strftime('%d.%m.%Y %H:%M') if project.created_at else "—"},
                 {"label": "Устройств",      "value": ps['total']},
+                {"label": "📂 Сетевая папка", "value": net_path},
             ]
         }
         
@@ -407,19 +422,19 @@ async def create_project(
 
                 if needs_mac1:
                     if row.mac_mode == 'manual' and i < len(row.manual_macs):
-                        mac1_val = _assign_manual_mac(db, row.manual_macs[i].mac1, new_device.id)
+                        mac1_val = _assign_manual_mac(db, row.manual_macs[i].mac1, new_device.id, project_id=new_proj.id)
                     else:
                         try:
-                            mac1_val = _next_free_mac(db, new_device.id)
+                            mac1_val = _next_free_mac(db, new_device.id, project_id=new_proj.id)
                         except ValueError as e:
                             mac_warnings.append(str(e))
 
                 if needs_mac2:
                     if row.mac_mode == 'manual' and i < len(row.manual_macs):
-                        mac2_val = _assign_manual_mac(db, row.manual_macs[i].mac2, new_device.id)
+                        mac2_val = _assign_manual_mac(db, row.manual_macs[i].mac2, new_device.id, project_id=new_proj.id)
                     else:
                         try:
-                            mac2_val = _next_free_mac(db, new_device.id)
+                            mac2_val = _next_free_mac(db, new_device.id, project_id=new_proj.id)
                         except ValueError as e:
                             mac_warnings.append(str(e))
 

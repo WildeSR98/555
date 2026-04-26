@@ -195,10 +195,17 @@ async def update_route_config(
             ))
 
     db.commit()
+    db.refresh(rc)
+    # Broadcast with stage timer data for real-time scan updates
+    stages_data = {
+        s.stage_key: s.timer_seconds if s.timer_seconds else 300
+        for s in rc.stages if s.is_enabled
+    }
     await ws_manager.broadcast({
         "type":       "route_saved",
         "id":         rc.id,
         "route_name": rc.name,
+        "stages":     stages_data,
     })
     return {"ok": True, "message": f"Маршрут «{rc.name}» обновлён"}
 

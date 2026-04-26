@@ -40,9 +40,57 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Application starting up...")
     _init_default_route()
+    # Запускаем фоновую задачу автозавершения сессий в 05:00
+    import asyncio
+    task = asyncio.create_task(_auto_close_sessions_loop())
     yield
     # Shutdown
+    task.cancel()
     logger.info("Application shutting down...")
+
+
+async def _auto_close_sessions_loop():
+    """Background task: auto-close all active work sessions at 05:00 every day."""
+    import asyncio
+    from datetime import datetime as _dt, timedelta
+    while True:
+        now = _dt.now()
+        # Вычисляем время до следующего 05:00
+        target = now.replace(hour=5, minute=0, second=0, microsecond=0)
+        if now >= target:
+            target += timedelta(days=1)
+        wait_seconds = (target - now).total_seconds()
+        logger.info(f"[AutoClose] Next auto-close at {target}, waiting {wait_seconds:.0f}s")
+        await asyncio.sleep(wait_seconds)
+        # Закрываем все активные сессии
+        try:
+            _do_auto_close_sessions()
+        except Exception as e:
+            logger.error(f"[AutoClose] Error: {e}")
+
+
+def _do_auto_close_sessions():
+    """Close all active work sessions (server-side, runs at 05:00)."""
+    from src.database import SessionLocal
+    from src.models import WorkSession
+    from datetime import datetime as _dt
+    db = SessionLocal()
+    try:
+        active = db.query(WorkSession).filter(WorkSession.is_active == True).all()
+        count = 0
+        for s in active:
+            s.is_active = False
+            s.ended_at = _dt.now()
+            count += 1
+        if count > 0:
+            db.commit()
+            logger.info(f"[AutoClose] Closed {count} active sessions at 05:00")
+        else:
+            logger.info("[AutoClose] No active sessions to close at 05:00")
+    except Exception as e:
+        logger.error(f"[AutoClose] DB error: {e}")
+    finally:
+        db.close()
 
 
 def _init_default_route():

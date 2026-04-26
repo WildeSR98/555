@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from src.database import get_db
-from src.models import MacAddress, Device, User
+from src.models import MacAddress, Device, User, Project
 from web.dependencies import get_current_user
 
 router = APIRouter()
@@ -59,26 +59,27 @@ def list_macs_paired(
     db: Session = Depends(get_db),
 ):
     """
-    Список MAC сгруппированных по устройству.
-    Поиск работает по MAC-адресу, SN устройства и названию проекта.
+    Список MAC сгруппированных по устройству (device_id).
+    Показывает название проекта вместо SN устройства.
     """
-    from src.models import Project
-    from sqlalchemy.orm import joinedload
     from collections import defaultdict
+    from sqlalchemy.orm import joinedload
 
-    q = db.query(MacAddress).options(joinedload(MacAddress.device))
+    q = db.query(MacAddress).options(
+        joinedload(MacAddress.device),
+        joinedload(MacAddress.project),
+    )
     if used.upper() == 'FREE':
         q = q.filter(MacAddress.is_used == False)
     elif used.upper() == 'USED':
         q = q.filter(MacAddress.is_used == True)
 
-    # Поиск — пост-фильтрация по MAC, SN и проекту после группировки
     s_upper = search.strip().upper()
 
     all_rows = q.order_by(MacAddress.id).limit(limit * 4).all()
 
-    # Группируем по device_id (None = свободные)
-    by_device: dict = defaultdict(lambda: {'macs': [], 'device': None})
+    # Группируем по device_id (как раньше) — каждое устройство = 1–2 MAC
+    by_device: dict = defaultdict(lambda: {'macs': [], 'device': None, 'project': None})
     free_list = []
 
     for r in all_rows:
@@ -86,20 +87,24 @@ def list_macs_paired(
             free_list.append(r)
         else:
             by_device[r.device_id]['device'] = r.device
+            by_device[r.device_id]['project'] = r.project
             by_device[r.device_id]['macs'].append(r)
 
     result = []
 
-    # Используемые
+    # Используемые — по устройствам
     for dev_id, info in by_device.items():
         dev  = info['device']
+        proj = info['project']
         macs = info['macs']
+        # Название проекта: из MAC.project, или из device.project
         project_name = ''
-        if dev and dev.project_id:
-            proj = db.query(Project).get(dev.project_id)
-            project_name = proj.name if proj else ''
+        if proj:
+            project_name = proj.name
+        elif dev and dev.project_id:
+            p = db.query(Project).get(dev.project_id)
+            project_name = p.name if p else ''
         result.append({
-            'device_sn':    dev.serial_number if dev else None,
             'project_name': project_name,
             'mac1':         macs[0].mac if len(macs) > 0 else None,
             'mac2':         macs[1].mac if len(macs) > 1 else None,
@@ -112,23 +117,21 @@ def list_macs_paired(
     # Свободные — по одному
     for r in free_list:
         result.append({
-            'device_sn':    None,
             'project_name': None,
             'mac1':         r.mac,
             'mac2':         None,
             'mac1_id':      r.id,
             'mac2_id':      None,
-            'is_used':      False,
+            'is_used':      r.is_used,
             'created_at':   r.created_at.strftime('%d.%m.%Y') if r.created_at else None,
         })
 
-    # Пост-фильтрация по SN и проекту (если есть строка поиска)
+    # Пост-фильтрация по MAC и проекту
     if s_upper:
         result = [
             r for r in result
             if s_upper in (r['mac1'] or '').upper()
             or s_upper in (r['mac2'] or '').upper()
-            or s_upper in (r['device_sn'] or '').upper()
             or s_upper in (r['project_name'] or '').upper()
         ]
 

@@ -115,18 +115,11 @@
 
             <button type="button" class="btn btn-secondary" onclick="addDeviceRow()">➕ Добавить партномер</button>
 
-            <div style="margin-top:14px; padding:12px; background:rgba(99,102,241,.06); border-radius:8px; border:1px solid rgba(99,102,241,.2);">
-                <label style="font-weight:600; margin-bottom:6px; display:block;">📋 Маршрутный лист
-                    <span style="font-size:11px; font-weight:400; color:var(--text-muted); margin-left:4px;">автовыбор по типу устройства</span>
-                </label>
-                <select id="pRouteConfig" style="width:100%; padding:8px; border-radius:4px; border:1px solid var(--border); background:var(--card-bg); color:var(--text);">
-                    <option value="">— Автовыбор —</option>
-                </select>
-                <div id="routeHint" style="font-size:11px; color:#6366f1; margin-top:4px;"></div>
-                <div id="routeBreakdown" style="display:none; margin-top:10px; padding:10px 12px; background:rgba(99,102,241,.05); border:1px solid rgba(99,102,241,.2); border-radius:6px;">
-                    <div style="font-size:11px; font-weight:700; color:var(--text-muted); margin-bottom:6px; text-transform:uppercase; letter-spacing:.5px;">📋 Маршруты по типам устройств:</div>
-                    <div id="routeBreakdownList"></div>
-                </div>
+            <!-- Маршрутный лист убран из формы создания, назначается отдельно -->
+            <input type="hidden" id="pRouteConfig" value="">
+            <div id="routeHint" style="display:none;"></div>
+            <div id="routeBreakdown" style="display:none;">
+                <div id="routeBreakdownList"></div>
             </div>
 
             <div class="modal-buttons" style="margin-top:20px;">
