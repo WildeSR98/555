@@ -269,6 +269,7 @@ function restoreState() {
         state.workerName     = data.workerName || '';
         state.workplaceName  = data.workplaceName || '';
         state.lastFeedback   = data.lastFeedback || null;
+        state.stageTimerSeconds = data.stageTimerSeconds || 300;
 
         document.getElementById('lblWorker').textContent    = state.workerName;
         document.getElementById('lblWorkplace').textContent = state.workplaceName;
@@ -285,6 +286,11 @@ function restoreState() {
 
         if (state.lastFeedback) {
             showFeedback(state.lastFeedback.type, state.lastFeedback.text, true);
+        }
+
+        // Если есть устройства в фазе action — перезапускаем таймер
+        if (state.phase === 'action' && state.devices.length > 0) {
+            startStageTimer(state.stageTimerSeconds);
         }
 
         document.getElementById('snInput').focus();
