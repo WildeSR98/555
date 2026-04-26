@@ -1076,11 +1076,30 @@ window.addEventListener('ws:route_saved', (e) => {
         const newTimer = stages[stageKey];
         if (newTimer && newTimer !== state.stageTimerSeconds) {
             state.stageTimerSeconds = newTimer;
-            console.log(`[WS] Таймер обновлён: ${stageKey} → ${newTimer}s`);
-            // Если таймер сейчас активен — перезапускаем с новым значением
+            console.log(`[WS] Таймер обновлён (глобальный): ${stageKey} → ${newTimer}s`);
             if (_timerInterval) {
                 startStageTimer(newTimer);
                 showFeedback('info', `⏱ Таймер обновлён: ${Math.floor(newTimer/60)}:${String(newTimer%60).padStart(2,'0')}`, true);
+            }
+        }
+    }
+});
+
+// ─── Обновление таймера при изменении ПРОЕКТНОГО маршрута ─────────────────────
+window.addEventListener('ws:project_route_saved', (e) => {
+    const detail = e.detail;
+    if (!state.sessionId || !state.workplaceType) return;
+    const stages = detail.stages;
+    if (!stages) return;
+    const stageKey = state.workplaceType;
+    if (stageKey in stages) {
+        const newTimer = stages[stageKey];
+        if (newTimer && newTimer !== state.stageTimerSeconds) {
+            state.stageTimerSeconds = newTimer;
+            console.log(`[WS] Таймер обновлён (проект ${detail.project_name}): ${stageKey} → ${newTimer}s`);
+            if (_timerInterval) {
+                startStageTimer(newTimer);
+                showFeedback('info', `⏱ Таймер обновлён (${detail.project_name}): ${Math.floor(newTimer/60)}:${String(newTimer%60).padStart(2,'0')}`, true);
             }
         }
     }

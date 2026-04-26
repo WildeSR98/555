@@ -348,11 +348,24 @@ async def save_project_device_route(
     )
 
     db.commit()
+
+    # Собираем таймеры для WS broadcast
+    saved_stages = (
+        db.query(ProjectRouteStage)
+        .filter_by(project_id=project_id, device_type=device_type)
+        .all()
+    )
+    stages_timers = {
+        (s.stage_key.split('::')[0] if '::' in s.stage_key else s.stage_key): (s.timer_seconds or 300)
+        for s in saved_stages if s.is_enabled
+    }
+
     await ws_manager.broadcast({
         "type":         "project_route_saved",
         "project_id":   project_id,
         "project_name": project.name,
         "device_type":  device_type,
+        "stages":       stages_timers,
     })
     response = {
         "ok":      True,

@@ -140,17 +140,9 @@ def start_session(
         db.commit()
         db.refresh(session_obj)
 
-    # Найти таймер для этапа из глобального маршрутного листа (workplace_type == stage_key)
-    from src.models import RouteConfig as _RC, RouteConfigStage as _RCS
+    # Таймер по умолчанию — реальный таймер определяется при scan_in устройства
+    # (из ProjectRouteStage проекта, к которому принадлежит устройство)
     stage_timer = 300
-    stage_key = workplace.workplace_type  # напр. TECH_CONTROL_2_1
-    rc = db.query(_RC).filter_by(device_type=stage_key).first() \
-        or db.query(_RC).filter_by(is_default=True).first()
-    if rc:
-        for st in rc.stages:
-            if st.stage_key == stage_key and st.is_enabled:
-                stage_timer = st.timer_seconds if st.timer_seconds else 300
-                break
 
     return {
         "ok": True,
