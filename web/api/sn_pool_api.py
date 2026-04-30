@@ -140,6 +140,40 @@ async def update_category(code: str, data: CategoryUpdateInput, db: Session = De
     return {"ok": True, "message": f"Категория обновлена"}
 
 
+class DeleteCategoryRequest(BaseModel):
+    password: str
+
+
+@router.delete("/categories/{code}")
+def delete_category(
+    code: str,
+    data: DeleteCategoryRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Удалить категорию устройств. Требует пароль ADMIN/ROOT. Блокируется если есть модели."""
+    if current_user.role not in ('ADMIN', 'ROOT'):
+        raise HTTPException(403, "Недостаточно прав")
+    if not current_user.check_password(data.password):
+        raise HTTPException(403, "Неверный пароль администратора")
+
+    cat = db.query(DeviceCategory).filter_by(code=code).first()
+    if not cat:
+        raise HTTPException(404, f"Категория «{code}» не найдена")
+
+    models_count = db.query(DeviceModel).filter_by(category=code).count()
+    if models_count > 0:
+        raise HTTPException(
+            400,
+            f"Нельзя удалить: в категории есть {models_count} моделей. Сначала удалите модели."
+        )
+
+    cat_name = cat.display_name
+    db.delete(cat)
+    db.commit()
+    return {"ok": True, "message": f"Категория «{cat_name}» удалена"}
+
+
 @router.get("/models/{model_id}/sns")
 def get_model_sns(model_id: int, sn: str = "", db: Session = Depends(get_db)):
     """Получить все SN для конкретной модели (с поиском)."""

@@ -237,6 +237,12 @@
 }
 .tree-cat:hover .cat-edit-btn { display: inline-block; }
 .tree-cat .cat-edit-btn:hover { background: rgba(99,102,241,.15); color: #6366f1; }
+.tree-cat .cat-del-btn {
+    display: none; background: none; border: none; cursor: pointer;
+    font-size: 13px; color: #94a3b8; padding: 2px 5px; border-radius: 4px;
+}
+.tree-cat:hover .cat-del-btn { display: inline-block; }
+.tree-cat .cat-del-btn:hover { background: rgba(239,68,68,.15); color: #ef4444; }
 .tree-mod { padding: 6px 5px 6px 25px; cursor: pointer; font-size: 14px; position:relative; display:flex; align-items:center; gap:4px; }
 .tree-mod:hover { background: #f1f5f9; }
 .tree-mod.active { background: #e0f2fe; color: #0284c7; font-weight: 600; border-right: 3px solid #0284c7; }
@@ -282,6 +288,8 @@ async function loadTree() {
                 <span class="cat-name">📁 ${catName}</span>
                 <button class="cat-edit-btn" title="Редактировать категорию"
                         onclick="openEditCategoryModal('${cat.id}', '${catName}', event)">⚙️</button>
+                <button class="cat-del-btn" title="Удалить категорию"
+                        onclick="openDeleteCategoryModal('${cat.id}', '${catName}', event)">🗑️</button>
             </div>`;
             const mul = document.createElement('ul');
             mul.style.listStyle = 'none';
@@ -537,6 +545,41 @@ window.addEventListener('ws:sn_pool_updated', () => {
     loadTree();
 });
 
+// ─── Удаление категории ───────────────────────────────────────────────────────
+let _deleteCatCode = null;
+let _deleteCatName = null;
+
+function openDeleteCategoryModal(code, name, e) {
+    if (e) e.stopPropagation();
+    _deleteCatCode = code;
+    _deleteCatName = name;
+    document.getElementById('deleteCatName').textContent = name;
+    document.getElementById('deleteCatPwd').value = '';
+    document.getElementById('deleteCategoryModal').style.display = 'flex';
+    setTimeout(() => document.getElementById('deleteCatPwd').focus(), 100);
+}
+
+async function submitDeleteCategory(e) {
+    e.preventDefault();
+    const pwd = document.getElementById('deleteCatPwd').value;
+    if (!pwd) return;
+    try {
+        const resp = await fetch(`/api/sn-pool/categories/${_deleteCatCode}`, {
+            method: 'DELETE',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ password: pwd })
+        });
+        const res = await resp.json();
+        if (resp.ok) {
+            closeModal('deleteCategoryModal');
+            await fetchCategories();
+            loadTree();
+        } else {
+            alert(res.detail || 'Ошибка удаления категории');
+        }
+    } catch(err) { alert('Ошибка сети: ' + err.message); }
+}
+
 // ─── Удаление модели ──────────────────────────────────────────────────────────
 let _deleteModelId   = null;
 let _deleteModelName = null;
@@ -712,6 +755,27 @@ async function deleteMacPair(id1, id2) {
             </div>
             <div style="display:flex; gap:10px; justify-content:flex-end;">
                 <button type="button" class="btn" onclick="closeModal('deleteModelModal')">Отмена</button>
+                <button type="submit" class="btn btn-danger">Удалить</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Модалка: Удалить категорию -->
+<div id="deleteCategoryModal" class="modal-overlay" style="display:none;">
+    <div class="modal-card" style="max-width:430px;">
+        <h3 style="color:#ef4444;">🗑️ Удалить категорию</h3>
+        <p class="text-muted" style="margin-bottom:12px;">
+            Категория: <strong id="deleteCatName"></strong><br>
+            <span style="color:#ef4444;">Удаление возможно только если в категории нет моделей.</span>
+        </p>
+        <form onsubmit="submitDeleteCategory(event)">
+            <div class="form-group">
+                <label>Пароль администратора:</label>
+                <input type="password" id="deleteCatPwd" class="input-large" placeholder="Введите пароль..." required>
+            </div>
+            <div style="display:flex; gap:10px; justify-content:flex-end;">
+                <button type="button" class="btn" onclick="closeModal('deleteCategoryModal')">Отмена</button>
                 <button type="submit" class="btn btn-danger">Удалить</button>
             </div>
         </form>
