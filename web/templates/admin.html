@@ -210,6 +210,32 @@
         <span id="settingsSaveMsg" style="font-size:13px; color:#22c55e; display:none;">✓ Сохранено</span>
     </div>
 </div>
+
+<!-- ── Видимость вкладок по ролям ── -->
+<div class="card" style="margin-top:28px; border:2px solid #7c3aed;">
+    <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px;">
+        <span style="font-size:22px;">🗂️</span>
+        <div>
+            <h3 style="margin:0; color:#7c3aed;">Видимость вкладок</h3>
+            <p class="text-muted" style="margin:0; font-size:12px;">
+                Какие вкладки видит каждая роль в боковом меню.<br>
+                ROOT всегда видит все вкладки. Если роль не настроена — видит все.
+            </p>
+        </div>
+    </div>
+    <div style="overflow-x:auto;">
+        <table class="table" id="navPermTable" style="min-width:700px;">
+            <thead id="navPermHead"></thead>
+            <tbody id="navPermBody">
+                <tr><td class="text-muted text-center">Загрузка...</td></tr>
+            </tbody>
+        </table>
+    </div>
+    <div style="display:flex; align-items:center; gap:12px; margin-top:16px;">
+        <button class="btn btn-primary" onclick="saveNavPerms()">💾 Сохранить видимость</button>
+        <span id="navPermSaveMsg" style="font-size:13px; color:#22c55e; display:none;">✓ Сохранено</span>
+    </div>
+</div>
 {% endif %}
 </div><!-- /tab-users -->
 
@@ -452,6 +478,94 @@ async function saveSettings() {
 // Загружаем настройки только если есть таблица (т.е. ROOT)
 if (document.getElementById('settingsTable')) {
     loadSettings();
+}
+
+// ===================== NAV PERMISSIONS (ROOT) =====================
+const NAV_TABS = [
+    {key: 'dashboard', label: '📊 Дашборд'},
+    {key: 'analytics', label: '📈 Аналитика'},
+    {key: 'projects',  label: '📁 Проекты'},
+    {key: 'pipeline',  label: '🔄 Конвейер'},
+    {key: 'scan',      label: '📷 Скан'},
+    {key: 'devices',   label: '🔧 Устройства'},
+    {key: 'sn_pool',   label: '🏷️ SN Пул'},
+    {key: 'routes',    label: '📋 Маршруты'},
+    {key: 'archive',   label: '📦 Архив'},
+    {key: 'admin',     label: '⚙️ Админ'},
+];
+const NAV_ROLES = [
+    {key: 'ADMIN',        label: 'Администратор'},
+    {key: 'MANAGER',      label: 'Менеджер'},
+    {key: 'SHOP_MANAGER', label: 'Начальник цеха'},
+    {key: 'EMPLOYEE',     label: 'Сотрудник'},
+    {key: 'WORKER',       label: 'Работник'},
+];
+
+function buildNavPermTable(currentPerms) {
+    // Header
+    const thead = document.getElementById('navPermHead');
+    thead.innerHTML = '<tr><th>Роль / Вкладка</th>' +
+        NAV_TABS.map(t => `<th style="text-align:center; font-size:11px; writing-mode:vertical-rl; padding:6px 4px;">${t.label}</th>`).join('') +
+        '</tr>';
+
+    // Body: one row per role
+    const tbody = document.getElementById('navPermBody');
+    tbody.innerHTML = NAV_ROLES.map(role => {
+        const allowed = currentPerms[role.key];  // undefined = all tabs (no restriction)
+        const cells = NAV_TABS.map(tab => {
+            // If no config for this role → checkbox checked by default (all allowed)
+            const isChecked = allowed === undefined ? true : allowed.includes(tab.key);
+            return `<td style="text-align:center;">
+                <label class="toggle-switch">
+                    <input type="checkbox" id="nav_${role.key}_${tab.key}" ${isChecked ? 'checked' : ''}>
+                    <span class="toggle-slider"></span>
+                </label>
+            </td>`;
+        }).join('');
+        return `<tr>
+            <td><strong>${role.label}</strong> <span class="text-muted" style="font-size:11px;">${role.key}</span></td>
+            ${cells}
+        </tr>`;
+    }).join('');
+}
+
+async function loadNavPerms() {
+    if (!document.getElementById('navPermTable')) return;
+    try {
+        const resp = await fetch('/api/admin/nav-permissions');
+        const data = resp.ok ? await resp.json() : {};
+        buildNavPermTable(data);
+    } catch(e) {
+        buildNavPermTable({});
+    }
+}
+
+async function saveNavPerms() {
+    const permissions = {};
+    NAV_ROLES.forEach(role => {
+        permissions[role.key] = NAV_TABS
+            .filter(tab => document.getElementById(`nav_${role.key}_${tab.key}`)?.checked)
+            .map(tab => tab.key);
+    });
+    try {
+        const resp = await fetch('/api/admin/nav-permissions', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({permissions})
+        });
+        const result = await resp.json();
+        if (resp.ok) {
+            const msg = document.getElementById('navPermSaveMsg');
+            msg.style.display = 'inline';
+            setTimeout(() => msg.style.display = 'none', 3000);
+        } else {
+            alert(result.detail || 'Ошибка сохранения');
+        }
+    } catch(e) { alert('Ошибка сети: ' + e.message); }
+}
+
+if (document.getElementById('navPermTable')) {
+    loadNavPerms();
 }
 
 // ===================== TABS =====================

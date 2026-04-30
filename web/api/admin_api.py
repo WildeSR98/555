@@ -187,6 +187,60 @@ def update_settings(
     return {"ok": True, "message": "Настройки сохранены"}
 
 
+# ─── Nav Permissions (ROOT only) ─────────────────────────────────────────────
+
+class NavPermissionsInput(BaseModel):
+    permissions: dict  # {"WORKER": ["scan", "dashboard"], ...}
+
+
+@router.get("/nav-permissions")
+def get_nav_permissions(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Настройки видимости вкладок по ролям — только ROOT."""
+    if current_user.role != 'ROOT':
+        raise HTTPException(403, "Доступ запрещён")
+    cfg = db.query(SystemConfig).filter_by(key='nav_permissions').first()
+    if cfg and cfg.value:
+        return json.loads(cfg.value)
+    return {}
+
+
+@router.put("/nav-permissions")
+def update_nav_permissions(
+    data: NavPermissionsInput,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Обновить видимость вкладок по ролям — только ROOT."""
+    if current_user.role != 'ROOT':
+        raise HTTPException(403, "Доступ запрещён")
+
+    from web.dependencies import ALL_NAV_TABS
+    ALLOWED_ROLES = {'ADMIN', 'MANAGER', 'SHOP_MANAGER', 'EMPLOYEE', 'WORKER'}
+    ALLOWED_TABS  = {t['key'] for t in ALL_NAV_TABS}
+
+    cleaned = {
+        role: [tab for tab in tabs if tab in ALLOWED_TABS]
+        for role, tabs in data.permissions.items()
+        if role in ALLOWED_ROLES
+    }
+
+    cfg = db.query(SystemConfig).filter_by(key='nav_permissions').first()
+    if cfg:
+        cfg.value      = json.dumps(cleaned, ensure_ascii=False)
+        cfg.updated_at = datetime.now()
+    else:
+        db.add(SystemConfig(
+            key='nav_permissions',
+            value=json.dumps(cleaned, ensure_ascii=False),
+            updated_at=datetime.now(),
+        ))
+    db.commit()
+    return {"ok": True, "message": "Видимость вкладок сохранена"}
+
+
 # =============================================
 # Загрузка изображений на сетевой диск
 # =============================================

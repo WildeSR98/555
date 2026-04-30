@@ -35,18 +35,9 @@
         </div>
         
         <ul class="nav-menu">
-            <li><a href="/dashboard" class="{% if request.url.path == '/dashboard' %}active{% endif %}">📊 Дашборд</a></li>
-            <li><a href="/analytics" class="{% if request.url.path == '/analytics' %}active{% endif %}">📈 Аналитика</a></li>
-            <li><a href="/projects" class="{% if request.url.path == '/projects' %}active{% endif %}">📁 Проекты</a></li>
-            <li><a href="/pipeline" class="{% if request.url.path == '/pipeline' %}active{% endif %}">🔄 Конвейер</a></li>
-            <li><a href="/scan" class="{% if request.url.path == '/scan' %}active{% endif %}">📷 Скан</a></li>
-            <li><a href="/devices" class="{% if request.url.path == '/devices' %}active{% endif %}">🔧 Устройства</a></li>
-            <li><a href="/sn-pool" class="{% if request.url.path == '/sn-pool' %}active{% endif %}">🏷️ SN Пул</a></li>
-            <li><a href="/route-configs" class="{% if request.url.path == '/route-configs' %}active{% endif %}">📋 Маршруты</a></li>
-            <li><a href="/archive" class="{% if request.url.path == '/archive' %}active{% endif %}">📦 Архив</a></li>
-            {% if user.role in ('ADMIN', 'ROOT', 'SHOP_MANAGER') %}
-            <li><a href="/admin" class="{% if request.url.path == '/admin' %}active{% endif %}">⚙️ Админ</a></li>
-            {% endif %}
+            {% for tab in nav_tabs %}
+            <li><a href="{{ tab.url }}" class="{% if request.url.path == tab.url %}active{% endif %}">{{ tab.label }}</a></li>
+            {% endfor %}
         </ul>
         
         <div class="sidebar-footer">
