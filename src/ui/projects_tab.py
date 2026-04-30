@@ -662,6 +662,13 @@ class ProjectsTab(QWidget):
                 project = session.query(Project).get(entity_id)
                 if project:
                     self.details_title.setText(f'📁 Проект: {project.name}')
+                    import os as _os_env
+                    from pathlib import Path as _Path
+                    _net_base = _os_env.environ.get('NET_PROJECTS_DIR', '')
+                    if _net_base:
+                        _net_path = str(_Path(_net_base) / project.name)
+                    else:
+                        _net_path = '—'
                     fields = [
                         ('Код', project.code),
                         ('Название', project.name),
@@ -672,6 +679,7 @@ class ProjectsTab(QWidget):
                         ('Дедлайн', str(project.deadline) if project.deadline else '—'),
                         ('Создан', project.created_at.strftime('%d.%m.%Y %H:%M') if project.created_at else '—'),
                         ('Устройств', str(len(project.devices))),
+                        ('📂 Сетевая папка', _net_path),
                     ]
             elif entity_type == 'device':
                 device = session.query(Device).get(entity_id)
@@ -705,8 +713,39 @@ class ProjectsTab(QWidget):
 
             self.details_table.setRowCount(len(fields))
             for i, (key, value) in enumerate(fields):
-                self.details_table.setItem(i, 0, QTableWidgetItem(key))
-                self.details_table.setItem(i, 1, QTableWidgetItem(str(value)))
+                key_item = QTableWidgetItem(key)
+                self.details_table.setItem(i, 0, key_item)
+
+                if key == 'Спецификация' and value and value != '—':
+                    # Кликабельная ссылка на спецификацию
+                    import webbrowser as _wb
+                    lbl = QLabel(f'<a href="{value}" style="color:#6366f1;">{value}</a>')
+                    lbl.setOpenExternalLinks(True)
+                    lbl.setWordWrap(True)
+                    lbl.setTextFormat(Qt.TextFormat.RichText)
+                    lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+                    self.details_table.setCellWidget(i, 1, lbl)
+                elif '📂' in key and value and value != '—':
+                    # Кликабельная сетевая папка
+                    import os as _os
+                    net_path = value
+                    btn_lbl = QLabel(f'<a href="file:///{net_path}" style="color:#6366f1;">{net_path}</a>')
+                    btn_lbl.setWordWrap(True)
+                    btn_lbl.setTextFormat(Qt.TextFormat.RichText)
+                    btn_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+
+                    def _make_opener(p):
+                        def _open(url):
+                            try:
+                                _os.startfile(p)
+                            except Exception:
+                                pass
+                        return _open
+
+                    btn_lbl.linkActivated.connect(_make_opener(net_path))
+                    self.details_table.setCellWidget(i, 1, btn_lbl)
+                else:
+                    self.details_table.setItem(i, 1, QTableWidgetItem(str(value)))
                 
             self.details_table.resizeRowsToContents()
 

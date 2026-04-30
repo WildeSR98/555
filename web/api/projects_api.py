@@ -323,6 +323,58 @@ def get_entity_details(entity_type: str, entity_id: int, db: Session = Depends(g
     raise HTTPException(400, "Unknown entity type")
 
 
+class OpenFolderRequest(BaseModel):
+    path: str
+
+
+@router.post("/open-folder")
+def open_folder(data: OpenFolderRequest):
+    """Открыть папку в Проводнике Windows на сервере."""
+    import subprocess
+    path = data.path.strip()
+    if not path or path == '—':
+        raise HTTPException(400, "Путь не указан")
+    try:
+        # cmd /c start "" <path> — единственный надёжный способ открыть UNC-путь
+        subprocess.Popen(
+            ['cmd', '/c', 'start', '', path],
+            shell=False,
+            close_fds=True,
+        )
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(500, f"Не удалось открыть папку: {e}")
+
+
+@router.get("/install-protocol-script")
+def install_protocol_script():
+    """Bat-file to install opennet:// protocol handler on a workstation."""
+    from fastapi.responses import Response
+    vbs = r'\\192.168.106.29\PR_DEP\.apptools\open_net_folder.vbs'
+    lines = [
+        '@echo off',
+        ':: Install opennet:// protocol - run once per workstation',
+        '',
+        'reg add "HKCU\\SOFTWARE\\Classes\\opennet" /ve /d "URL:Open Network Folder" /f >nul',
+        'reg add "HKCU\\SOFTWARE\\Classes\\opennet" /v "URL Protocol" /d "" /f >nul',
+        ('reg add "HKCU\\SOFTWARE\\Classes\\opennet\\shell\\open\\command" /ve /d '
+         '"%SystemRoot%\\System32\\wscript.exe /B \\\"{vbs}\\\" \\\"%%1\\\""'
+         ' /f >nul').format(vbs=vbs),
+        '',
+        'echo.',
+        'echo [OK] Protocol opennet:// installed.',
+        'echo     The Open Folder button now works in your browser.',
+        'echo.',
+        'pause',
+    ]
+    bat = '\r\n'.join(lines) + '\r\n'
+    return Response(
+        content=bat.encode('cp866'),
+        media_type='application/octet-stream',
+        headers={'Content-Disposition': 'attachment; filename="install_opennet_protocol.bat"'}
+    )
+
+
 @router.post("/")
 async def create_project(
     data: ProjectCreateRequest, 
