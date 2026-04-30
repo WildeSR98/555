@@ -182,6 +182,8 @@
                     showSimpleToast('📋 Маршрут проекта', `${evt.project_name} → ${evt.device_type}`, '#6366f1');
                 } else if (evt.type === 'sn_pool_updated') {
                     showSimpleToast('🏷️ SN Пул', evt.message || 'Обновлено', '#0ea5e9');
+                } else if (evt.type === 'admin_broadcast') {
+                    showBroadcastToast(evt.message, evt.sender, evt.timestamp);
                 }
             };
 
@@ -306,6 +308,28 @@
                 toast.classList.add('hide');
                 setTimeout(() => toast.remove(), 400);
             }, 4000);
+        }
+
+        // ─── Broadcast Toast (admin_broadcast — заметный, 10 сек) ───
+        function showBroadcastToast(message, sender, ts) {
+            const container = document.getElementById('ws-toast-container');
+            if (!container) return;
+            const toast = document.createElement('div');
+            toast.className = 'ws-toast';
+            toast.style.cssText = 'border:2px solid #f59e0b; background:#1c1a12; min-width:300px;';
+            toast.innerHTML = `
+                <div class="ws-toast-title" style="color:#f59e0b; font-size:15px;">
+                    📢 Объявление
+                    <span style="margin-left:auto; font-size:11px; font-weight:400; color:#94a3b8;">${escapeHTML(ts||'')}</span>
+                </div>
+                <div class="ws-toast-body" style="font-size:14px; color:var(--text); margin-top:4px;">${escapeHTML(message)}</div>
+                <div style="font-size:11px; color:#94a3b8; margin-top:4px;">от: ${escapeHTML(sender||'Администратор')}</div>`;
+            container.appendChild(toast);
+            requestAnimationFrame(() => toast.classList.add('show'));
+            setTimeout(() => {
+                toast.classList.add('hide');
+                setTimeout(() => toast.remove(), 400);
+            }, 10000);
         }
 
         // Запустить при загрузке

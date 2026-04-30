@@ -21,6 +21,8 @@
     <button id="tab-users-btn" class="admin-tab-btn active" onclick="switchTab('users')">👥 Сотрудники</button>
     {% if user.role in ('ADMIN', 'ROOT') %}
     <button id="tab-logs-btn"  class="admin-tab-btn"        onclick="switchTab('logs')">📋 Логи ошибок</button>
+    <button id="tab-status-btn" class="admin-tab-btn"       onclick="switchTab('status')">🟢 Статус</button>
+    <button id="tab-broadcast-btn" class="admin-tab-btn"   onclick="switchTab('broadcast')">📢 Объявление</button>
     {% endif %}
 </div>
 
@@ -279,6 +281,49 @@
         </div>
     </div>
 </div><!-- /tab-logs -->
+
+<!-- ── Status panel ──────────────────────────────────────────────────────── -->
+<div id="tab-status" style="display:none;">
+    <div class="card" style="margin-bottom:16px; display:flex; align-items:center; gap:12px;">
+        <button class="btn btn-primary" onclick="loadStatus()">⟳ Проверить сейчас</button>
+        <span id="status-check-time" class="text-muted" style="font-size:12px;"></span>
+    </div>
+    <div id="status-cards" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(220px,1fr)); gap:16px;">
+        <div class="card" style="text-align:center; color:var(--text-muted);">Загрузка...</div>
+    </div>
+</div>
+
+<!-- ── Broadcast panel ───────────────────────────────────────────────────── -->
+<div id="tab-broadcast" style="display:none;">
+    <div class="card" style="max-width:600px;">
+        <h3 style="margin-bottom:8px;">📢 Рассылка объявления</h3>
+        <p class="text-muted" style="font-size:13px; margin-bottom:16px;">
+            Сообщение появится у всех авторизованных пользователей как всплывающее уведомление на 10 секунд.
+        </p>
+        <div class="form-group">
+            <label>Текст объявления:</label>
+            <textarea id="broadcastMsg" rows="4" placeholder="Введите текст сообщения..."
+                style="width:100%; padding:10px; border-radius:6px; border:1px solid var(--border);
+                       background:var(--card-bg); color:var(--text); font-size:14px;
+                       resize:vertical; font-family:inherit;"></textarea>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">
+                <span id="broadcastCharCount">0</span> / 500 символов
+            </div>
+        </div>
+        <div style="display:flex; gap:12px; align-items:center; margin-top:8px;">
+            <button class="btn btn-primary" onclick="sendBroadcast()" id="broadcastBtn">📢 Отправить всем</button>
+            <span id="broadcastResult" style="font-size:13px; display:none;"></span>
+        </div>
+    </div>
+    <div class="card" style="max-width:600px; margin-top:16px; background:rgba(245,158,11,.06); border:1px solid rgba(245,158,11,.3);">
+        <div style="font-size:13px; color:#f59e0b; font-weight:600; margin-bottom:6px;">Как выглядит для пользователей:</div>
+        <div style="background:#1c1a12; border:2px solid #f59e0b; border-radius:10px; padding:12px 14px; max-width:320px;">
+            <div style="color:#f59e0b; font-weight:700; font-size:15px; display:flex; align-items:center; gap:6px;">📢 Объявление <span style="margin-left:auto; font-size:11px; font-weight:400; color:#94a3b8;">сейчас</span></div>
+            <div style="color:var(--text); font-size:14px; margin-top:4px;">Текст вашего сообщения</div>
+            <div style="font-size:11px; color:#94a3b8; margin-top:4px;">от: Ваше имя</div>
+        </div>
+    </div>
+</div>
 
 <style>
 .toggle-switch { position:relative; display:inline-block; width:44px; height:24px; }
@@ -569,13 +614,97 @@ if (document.getElementById('navPermTable')) {
 }
 
 // ===================== TABS =====================
+const ALL_TABS = ['users', 'logs', 'status', 'broadcast'];
+
 function switchTab(tab) {
-    document.getElementById('tab-users').style.display = tab === 'users' ? '' : 'none';
-    document.getElementById('tab-logs').style.display  = tab === 'logs'  ? '' : 'none';
-    document.getElementById('tab-users-btn').classList.toggle('active', tab === 'users');
-    document.getElementById('tab-logs-btn').classList.toggle('active',  tab === 'logs');
-    document.getElementById('btn-add-user').style.display = tab === 'users' ? '' : 'none';
-    if (tab === 'logs') loadLogs();
+    ALL_TABS.forEach(t => {
+        const panel = document.getElementById(`tab-${t}`);
+        const btn   = document.getElementById(`tab-${t}-btn`);
+        if (panel) panel.style.display = (t === tab) ? '' : 'none';
+        if (btn)   btn.classList.toggle('active', t === tab);
+    });
+    // Скрыть/показать кнопку добавления сотрудника
+    const addBtn = document.getElementById('btn-add-user');
+    if (addBtn) addBtn.style.display = tab === 'users' ? '' : 'none';
+    // Загружаем данные при переключении
+    if (tab === 'logs')   loadLogs();
+    if (tab === 'status') loadStatus();
+}
+
+// ===================== STATUS =====================
+async function loadStatus() {
+    const grid = document.getElementById('status-cards');
+    const timeEl = document.getElementById('status-check-time');
+    if (!grid) return;
+    grid.innerHTML = '<div class="card" style="text-align:center;color:var(--text-muted);">Проверка...</div>';
+    try {
+        const resp = await fetch('/api/admin/service-status');
+        if (!resp.ok) throw new Error(resp.status);
+        const data = await resp.json();
+
+        const ORDER = ['db', 'ws', 'network', 'disk', 'uptime'];
+        const ICONS = { db: '🗄️', ws: '🔌', network: '🌐', disk: '💾', uptime: '⏱️' };
+
+        grid.innerHTML = ORDER.map(key => {
+            const s = data[key];
+            if (!s) return '';
+            const color = s.ok ? '#22c55e' : '#ef4444';
+            const dot   = s.ok ? '🟢' : '🔴';
+            return `<div class="card" style="text-align:center; padding:20px 16px;">
+                <div style="font-size:32px; margin-bottom:8px;">${ICONS[key] || '⚙️'}</div>
+                <div style="font-size:18px; margin-bottom:4px;">${dot}</div>
+                <div style="font-weight:700; font-size:15px; margin-bottom:6px;">${s.label}</div>
+                <div style="font-size:12px; color:${color};">${escHtml(s.msg)}</div>
+            </div>`;
+        }).join('');
+
+        if (timeEl) timeEl.textContent = 'Проверено: ' + new Date().toLocaleTimeString('ru');
+    } catch(e) {
+        grid.innerHTML = `<div class="card" style="color:#ef4444;">Ошибка: ${e.message}</div>`;
+    }
+}
+
+// ===================== BROADCAST =====================
+const _bcMsg = document.getElementById('broadcastMsg');
+if (_bcMsg) {
+    _bcMsg.addEventListener('input', () => {
+        const cnt = document.getElementById('broadcastCharCount');
+        if (cnt) cnt.textContent = _bcMsg.value.length;
+    });
+}
+
+async function sendBroadcast() {
+    const msg = (document.getElementById('broadcastMsg')?.value || '').trim();
+    const resultEl = document.getElementById('broadcastResult');
+    if (!msg) { alert('Введите текст сообщения'); return; }
+
+    const btn = document.getElementById('broadcastBtn');
+    if (btn) btn.disabled = true;
+    try {
+        const resp = await fetch('/api/admin/broadcast', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ message: msg })
+        });
+        const result = await resp.json();
+        if (resp.ok) {
+            if (resultEl) {
+                resultEl.style.display = 'inline';
+                resultEl.style.color   = '#22c55e';
+                resultEl.textContent   = '✓ ' + result.message;
+                setTimeout(() => { resultEl.style.display = 'none'; }, 5000);
+            }
+            document.getElementById('broadcastMsg').value = '';
+            const cnt = document.getElementById('broadcastCharCount');
+            if (cnt) cnt.textContent = '0';
+        } else {
+            alert(result.detail || 'Ошибка отправки');
+        }
+    } catch(e) {
+        alert('Ошибка сети: ' + e.message);
+    } finally {
+        if (btn) btn.disabled = false;
+    }
 }
 
 // ===================== LOGS =====================

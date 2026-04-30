@@ -15,6 +15,9 @@ from datetime import datetime
 from pydantic import BaseModel, Field, field_validator
 import re
 import json
+import os
+import shutil
+import concurrent.futures
 
 from src.database import get_db
 from src.models import User, WorkLog, SystemConfig
@@ -22,6 +25,9 @@ from src.system_config import get_all_settings, set_config
 from web.dependencies import get_current_user
 
 router = APIRouter()
+
+# Время запуска приложения (для uptime)
+_APP_START = datetime.now()
 
 
 class UserCreate(BaseModel):
@@ -240,6 +246,91 @@ def update_nav_permissions(
     db.commit()
     return {"ok": True, "message": "Видимость вкладок сохранена"}
 
+
+# ─── Service Status (АДМИН/ROOT) ───────────────────────────────────────────────────
+
+@router.get("/service-status")
+def get_service_status(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Статус всех сервисов системы. ADMIN/ROOT."""
+    from sqlalchemy import text
+    from web.ws_manager import manager as ws_manager
+
+    result = {}
+
+    # 1. БД
+    try:
+        db.execute(text("SELECT 1"))
+        result["db"] = {"ok": True,  "label": "PostgreSQL", "msg": "Подключено"}
+    except Exception as e:
+        result["db"] = {"ok": False, "label": "PostgreSQL", "msg": str(e)[:100]}
+
+    # 2. WebSocket подключения
+    count = ws_manager.count
+    result["ws"] = {"ok": count >= 0, "label": "WebSocket",
+                    "msg": f"{count} активных подключений"}
+
+    # 3. Сетевой диск (с таймаутом 3с, чтобы не виснуть)
+    net_path = os.getenv("NET_PROJECTS_DIR", r"\\192.168.106.29\PR_DEP")
+    try:
+        def _check_net():
+            return os.path.exists(net_path)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+            net_ok = ex.submit(_check_net).result(timeout=3)
+        result["network"] = {
+            "ok":    net_ok,
+            "label": "Сетевой диск",
+            "msg":   net_path if net_ok else "Недоступен",
+        }
+    except Exception:
+        result["network"] = {"ok": False, "label": "Сетевой диск", "msg": "Таймаут проверки"}
+
+    # 4. Дисковое пространство
+    try:
+        _, _, free = shutil.disk_usage(".")
+        free_gb = free / (2 ** 30)
+        result["disk"] = {
+            "ok":    free_gb > 0.5,
+            "label": "Диск",
+            "msg":   f"Свободно: {free_gb:.1f} ГБ",
+        }
+    except Exception:
+        result["disk"] = {"ok": False, "label": "Диск", "msg": "Ошибка"}
+
+    # 5. Uptime
+    uptime = datetime.now() - _APP_START
+    h = int(uptime.total_seconds() // 3600)
+    m = int((uptime.total_seconds() % 3600) // 60)
+    result["uptime"] = {"ok": True, "label": "Uptime", "msg": f"{h}ч {m}м"}
+
+    return result
+
+
+# ─── Broadcast (ADMIN/ROOT) ────────────────────────────────────────────────────────────
+
+class BroadcastInput(BaseModel):
+    message: str = Field(..., min_length=1, max_length=500)
+
+
+@router.post("/broadcast")
+async def send_broadcast(
+    data: BroadcastInput,
+    current_user: User = Depends(get_current_user),
+):
+    """Разослать WS-уведомление всем подключённым. ADMIN/ROOT."""
+    from web.ws_manager import manager as ws_manager
+    msg = data.message.strip()
+    if not msg:
+        raise HTTPException(400, "Сообщение не может быть пустым")
+    await ws_manager.broadcast({
+        "type":      "admin_broadcast",
+        "message":   msg,
+        "sender":    current_user.full_name,
+        "timestamp": datetime.now().strftime("%H:%M"),
+    })
+    return {"ok": True, "message": f"Отправлено {ws_manager.count} подключениям"}
 
 # =============================================
 # Загрузка изображений на сетевой диск
