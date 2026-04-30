@@ -1,11 +1,13 @@
 ---
 name: karpathy-guidelines
-description: 5 coding principles for quality work — think before code, simplicity, surgical edits, goal-oriented execution, full-scope tracing.
+description: ALWAYS ACTIVE. 5 mandatory coding principles — applied to every request without exception: think before code, simplicity, surgical edits, goal-oriented execution, full-scope tracing.
 ---
 
 # Karpathy Coding Guidelines
 
-Principles based on Andrey Karpathy's observations about typical LLM mistakes when writing code. These rules are MANDATORY when working with the project codebase.
+> **ALWAYS ACTIVE.** These rules apply to EVERY request — code changes, answers, analysis, refactoring, bug fixes, one-liners. No exceptions.
+
+Principles based on Andrey Karpathy's observations about typical LLM mistakes when writing code.
 
 ---
 
@@ -102,17 +104,21 @@ Common mistakes this rule prevents:
 
 ## When to Apply
 
-These principles are mandatory for **any non-trivial work** with code:
+These principles are **MANDATORY for every request**, including:
 - Adding new features
 - Refactoring
 - Bug fixing
 - DB migrations
 - Architecture changes
+- One-liners and typo fixes
+- Answering questions about the codebase
+- Any other interaction with the project
 
-For trivial tasks (typos, obvious one-liners) — use common sense.
+There are **no exceptions**. If a task seems trivial — the rules still apply.
 
 ---
 
 ## Note
 
-The goal is to reduce the number of expensive mistakes on complex tasks, not to slow down simple ones.
+The goal is to reduce mistakes at every level — not just complex tasks.
+Simple rules applied consistently prevent more bugs than complex rules applied selectively.
