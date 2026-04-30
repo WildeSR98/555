@@ -63,7 +63,12 @@ def resolve_next_status(current_status: str, enabled_stages: list) -> str:
     return candidate
 
 
-def _get_stage_timer(db, device, stage_key: str, default: int = 300) -> int:
+def _get_stage_timer(
+    db: "Session",
+    device: "Optional[Device]",
+    stage_key: str,
+    default: int = 300,
+) -> int:
     """Получить таймер этапа для устройства: ProjectRouteStage → RouteConfig → default."""
     if not device or not stage_key:
         return default
