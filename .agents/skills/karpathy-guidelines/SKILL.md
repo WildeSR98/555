@@ -43,12 +43,14 @@ Minimum code to solve the task. No abstractions for one-time use and no "future-
 Change only what was requested. Don't touch neighboring code and don't delete existing dead code without being asked.
 
 When editing existing code:
+
 - **Don't "improve"** neighboring code, comments, or formatting
 - **Don't refactor** what isn't broken
 - **Don't delete** dead code that existed before you — if you notice it, mention it but don't touch it
 - **Follow existing style**, even if you'd write it differently
 
 When your changes create "orphans":
+
 - Delete imports/variables/functions that YOUR changes made unused
 - Don't delete previously existing dead code without explicit request
 
@@ -63,17 +65,19 @@ Instead of vague instructions, formulate the task as a specific goal with verifi
 Instead of vague "fix the bug" → "write a test that reproduces the bug, then make it pass".
 
 For each task:
+
 1. **Define the goal** — what exactly should the outcome be
 2. **Define success criteria** — how to verify the goal is achieved
 3. **Create a plan with checks at each step:**
 
-```
+```text
 1. [Step] → check: [what to verify]
 2. [Step] → check: [what to verify]
 3. [Step] → check: [what to verify]
 ```
 
 Examples of correct formulation:
+
 - ❌ "Fix auth" → ✅ "Login with valid creds must return 200 + token, invalid — 401"
 - ❌ "Optimize the query" → ✅ "Query to orders table must execute < 100ms on 10K records"
 - ❌ "Fix the bug" → ✅ "Write a test reproducing the bug. Make it pass"
@@ -93,6 +97,7 @@ Before making any change, trace the ENTIRE flow of the affected function across 
 - **Verify side-effects** — if you change a timer value, check: where is it read? where is it validated? where is it displayed? where is it stored? Does the server enforce it independently of the client?
 
 Common mistakes this rule prevents:
+
 - Changing a server response field without updating client-side parsing
 - Adding a UI timer without adding server-side cooldown enforcement
 - Modifying a WS broadcast format without updating all WS listeners
@@ -105,6 +110,7 @@ Common mistakes this rule prevents:
 ## When to Apply
 
 These principles are **MANDATORY for every request**, including:
+
 - Adding new features
 - Refactoring
 - Bug fixing
