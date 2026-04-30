@@ -6,15 +6,17 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QDialog,
-    QLineEdit, QComboBox, QFormLayout, QMessageBox, QFrame
+    QLineEdit, QComboBox, QFormLayout, QMessageBox, QFrame,
+    QTabWidget, QTextEdit, QCheckBox, QSpinBox, QScrollArea
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
 from PyQt6.QtGui import QFont, QColor
 from datetime import datetime
 
 from ..database import get_session
-from ..models import User
+from ..models import User, SystemConfig
 from .styles import COLORS
+import os, re, json
 
 ROLE_CHOICES = [
     (User.ROLE_WORKER, 'Работник производства'),
@@ -255,12 +257,46 @@ class AdminPanelTab(QWidget):
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(16)
+        layout.setSpacing(12)
 
+        # Заголовок
         header = QHBoxLayout()
-        title = QLabel('⚙️ Управление персоналом')
+        title = QLabel('⚙️ Управление')
         title.setStyleSheet('font-size: 22px; font-weight: bold;')
         header.addWidget(title)
+        header.addStretch()
+        layout.addLayout(header)
+
+        subtitle = QLabel('Персонал и системные настройки')
+        subtitle.setStyleSheet(f'color: {COLORS["text_secondary"]}; font-size: 13px;')
+        layout.addWidget(subtitle)
+
+        # Суб-вкладки
+        self.sub_tabs = QTabWidget()
+
+        # 1. Сотрудники
+        staff_widget = self._build_staff_tab()
+        self.sub_tabs.addTab(staff_widget, '👥 Сотрудники')
+
+        # 2. Логи ошибок (только ADMIN/ROOT)
+        if self.user.role in (User.ROLE_ADMIN, User.ROLE_ROOT) or self.user.is_superuser:
+            logs_widget = self._build_logs_tab()
+            self.sub_tabs.addTab(logs_widget, '📋 Логи ошибок')
+
+        # 3. Системные настройки (только ROOT)
+        if self.user.role == User.ROLE_ROOT or self.user.is_superuser:
+            settings_widget = self._build_settings_tab()
+            self.sub_tabs.addTab(settings_widget, '🔧 Системные настройки')
+
+        layout.addWidget(self.sub_tabs)
+
+    # ── Staff tab ────────────────────────────────────────────────────────────
+    def _build_staff_tab(self) -> QWidget:
+        w = QWidget()
+        layout = QVBoxLayout(w)
+        layout.setContentsMargins(0, 8, 0, 0)
+
+        header = QHBoxLayout()
         header.addStretch()
 
         btn_refresh = QPushButton('⟳ Обновить')
@@ -321,6 +357,181 @@ class AdminPanelTab(QWidget):
             }}
         """)
         layout.addWidget(self.table)
+        return w
+
+    # ── Logs tab ────────────────────────────────────────────────────────────
+    def _build_logs_tab(self) -> QWidget:
+        w = QWidget()
+        layout = QVBoxLayout(w)
+        layout.setContentsMargins(0, 8, 0, 0)
+
+        ctrl = QHBoxLayout()
+        from PyQt6.QtWidgets import QComboBox as _CB
+        self._log_level = _CB()
+        self._log_level.addItems(['🔴 ERROR', '🟡 WARNING', '🟢 INFO', '📋 Все'])
+        ctrl.addWidget(QLabel('Уровень:'))
+        ctrl.addWidget(self._log_level)
+
+        self._log_search = QLineEdit()
+        self._log_search.setPlaceholderText('🔍 Поиск...')
+        ctrl.addWidget(self._log_search)
+
+        reload_btn = QPushButton('⟳ Обновить')
+        reload_btn.clicked.connect(self._load_logs)
+        ctrl.addWidget(reload_btn)
+        ctrl.addStretch()
+        layout.addLayout(ctrl)
+
+        self._log_table = QTableWidget()
+        self._log_table.setColumnCount(4)
+        self._log_table.setHorizontalHeaderLabels(['Дата/Время', 'Уровень', 'Компонент', 'Сообщение'])
+        self._log_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        self._log_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self._log_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self._log_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self._log_table.verticalHeader().setVisible(False)
+        self._log_table.setAlternatingRowColors(True)
+        layout.addWidget(self._log_table)
+
+        self._load_logs()
+        return w
+
+    def _load_logs(self) -> None:
+        from ..logger import LOG_FILE
+        level_map = {'ERROR': ['ERROR', 'CRITICAL'], 'WARNING': ['WARNING', 'ERROR', 'CRITICAL'],
+                     'INFO': ['INFO', 'WARNING', 'ERROR', 'CRITICAL'], 'ALL': None}
+        level_txt = self._log_level.currentText().split()[-1]
+        allowed = level_map.get(level_txt)
+        search = self._log_search.text().lower().strip() if hasattr(self, '_log_search') else ''
+
+        rows = []
+        pat = re.compile(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \| (\w+)\s+\| ([^|]+)\| (.*)')
+        try:
+            with open(LOG_FILE, encoding='utf-8', errors='replace') as f:
+                for line in f:
+                    m = pat.match(line.rstrip())
+                    if not m:
+                        # строка не соответствует формату — пропускаем
+                        continue
+                    dt, lvl, comp, msg = m.group(1), m.group(2).strip(), m.group(3).strip(), m.group(4).strip()
+                    if allowed and lvl not in allowed:
+                        continue
+                    if search and search not in msg.lower() and search not in comp.lower():
+                        continue
+                    rows.append((dt, lvl, comp, msg))
+        except (FileNotFoundError, PermissionError):
+            rows = []
+        except Exception:
+            rows = []
+
+        rows = rows[-200:]  # последние 200
+        level_colors = {'ERROR': '#ef4444', 'CRITICAL': '#dc2626', 'WARNING': '#ca8a04', 'INFO': '#818cf8'}
+
+        self._log_table.setRowCount(len(rows))
+        for i, (dt, lvl, comp, msg) in enumerate(rows):
+            self._log_table.setItem(i, 0, QTableWidgetItem(dt))
+            lvl_item = QTableWidgetItem(lvl)
+            lvl_item.setForeground(QColor(level_colors.get(lvl, COLORS['text_secondary'])))
+            self._log_table.setItem(i, 1, lvl_item)
+            self._log_table.setItem(i, 2, QTableWidgetItem(comp))
+            self._log_table.setItem(i, 3, QTableWidgetItem(msg))
+
+    # ── Settings tab ────────────────────────────────────────────────────────
+    SETTING_ROLES = [
+        ('ADMIN', 'Администратор'),
+        ('MANAGER', 'Менеджер'),
+        ('SHOP_MANAGER', 'Начальник цеха'),
+        ('EMPLOYEE', 'Сотрудник'),
+        ('WORKER', 'Работник'),
+    ]
+
+    def _build_settings_tab(self) -> QWidget:
+        w = QWidget()
+        layout = QVBoxLayout(w)
+        layout.setContentsMargins(0, 8, 0, 0)
+
+        title = QLabel('🔧 Системные настройки')
+        title.setStyleSheet('font-size: 16px; font-weight: bold;')
+        layout.addWidget(title)
+
+        subtitle = QLabel('Определяет привилегии ролей на производстве. Только для ROOT.')
+        subtitle.setStyleSheet(f'color: {COLORS["text_secondary"]}; font-size: 12px;')
+        layout.addWidget(subtitle)
+
+        self._settings_table = QTableWidget()
+        self._settings_table.setColumnCount(3)
+        self._settings_table.setHorizontalHeaderLabels(['Роль', 'Обход маршрута', 'Обход кулдауна (5 мин)'])
+        self._settings_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self._settings_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self._settings_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self._settings_table.verticalHeader().setVisible(False)
+        self._settings_table.setRowCount(len(self.SETTING_ROLES))
+
+        self._route_cbs = {}
+        self._cool_cbs = {}
+
+        for row, (role_key, role_label) in enumerate(self.SETTING_ROLES):
+            self._settings_table.setItem(row, 0, QTableWidgetItem(role_label))
+            for col, store in [(1, self._route_cbs), (2, self._cool_cbs)]:
+                cb = QCheckBox()
+                cw = QWidget()
+                cl = QHBoxLayout(cw)
+                cl.addWidget(cb)
+                cl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                cl.setContentsMargins(0, 0, 0, 0)
+                self._settings_table.setCellWidget(row, col, cw)
+                store[role_key] = cb
+
+        layout.addWidget(self._settings_table)
+
+        btn_bar = QHBoxLayout()
+        save_btn = QPushButton('💾 Сохранить настройки')
+        save_btn.setStyleSheet(f'background:{COLORS["accent"]}; color:white; border:none; border-radius:4px; padding:8px 20px; font-weight:bold;')
+        save_btn.clicked.connect(self._save_settings)
+        btn_bar.addWidget(save_btn)
+        btn_bar.addStretch()
+        layout.addLayout(btn_bar)
+        layout.addStretch()
+
+        self._load_settings()
+        return w
+
+    def _load_settings(self) -> None:
+        try:
+            session = get_session()
+            route_cfg = session.query(SystemConfig).filter(SystemConfig.key == 'route_bypass_roles').first()
+            cool_cfg  = session.query(SystemConfig).filter(SystemConfig.key == 'cooldown_bypass_roles').first()
+            session.close()
+
+            route_roles = json.loads(route_cfg.value) if route_cfg and route_cfg.value else []
+            cool_roles  = json.loads(cool_cfg.value)  if cool_cfg  and cool_cfg.value  else []
+
+            for role_key, _ in self.SETTING_ROLES:
+                if role_key in self._route_cbs:
+                    self._route_cbs[role_key].setChecked(role_key in route_roles)
+                if role_key in self._cool_cbs:
+                    self._cool_cbs[role_key].setChecked(role_key in cool_roles)
+        except Exception as e:
+            print(f'Settings load error: {e}')
+
+    def _save_settings(self) -> None:
+        route_roles = [k for k, _ in self.SETTING_ROLES if self._route_cbs.get(k) and self._route_cbs[k].isChecked()]
+        cool_roles  = [k for k, _ in self.SETTING_ROLES if self._cool_cbs.get(k)  and self._cool_cbs[k].isChecked()]
+        try:
+            from datetime import datetime as _dt
+            session = get_session()
+            for key, val in [('route_bypass_roles', route_roles), ('cooldown_bypass_roles', cool_roles)]:
+                cfg = session.query(SystemConfig).filter(SystemConfig.key == key).first()
+                if cfg:
+                    cfg.value = json.dumps(val)
+                    cfg.updated_at = _dt.now()
+                else:
+                    session.add(SystemConfig(key=key, value=json.dumps(val), updated_at=_dt.now()))
+            session.commit()
+            session.close()
+            QMessageBox.information(self, 'Сохранено', 'Настройки сохранены.')
+        except Exception as e:
+            QMessageBox.critical(self, 'Ошибка', str(e))
 
     def refresh_data(self):
         """Запуск фоновой загрузки пользователей."""

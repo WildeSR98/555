@@ -63,6 +63,35 @@ def resolve_next_status(current_status: str, enabled_stages: list) -> str:
     return candidate
 
 
+def _get_stage_timer(db, device, stage_key: str, default: int = 300) -> int:
+    """Получить таймер этапа для устройства: ProjectRouteStage → RouteConfig → default."""
+    if not device or not stage_key:
+        return default
+    if device.project_id:
+        # 1. Проектный маршрут
+        pr_stages = (
+            db.query(ProjectRouteStage)
+            .filter_by(project_id=device.project_id, device_type=device.device_type)
+            .filter(ProjectRouteStage.is_enabled == True)
+            .all()
+        )
+        for s in pr_stages:
+            base = s.stage_key.split('::')[0] if '::' in s.stage_key else s.stage_key
+            if base == stage_key and s.timer_seconds:
+                return s.timer_seconds
+    # 2. Глобальный RouteConfig
+    rc = (
+        db.query(RouteConfig).filter_by(device_type=device.device_type).first()
+        or db.query(RouteConfig).filter_by(is_default=True).first()
+    )
+    if rc:
+        for st in rc.stages:
+            if st.stage_key == stage_key and st.is_enabled:
+                return st.timer_seconds if st.timer_seconds else default
+    return default
+
+
+
 class StartSessionRequest(BaseModel):
     workplace_id: int = Field(..., gt=0)
 
@@ -99,47 +128,7 @@ def get_device_timer(
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
         return {"timer_seconds": 300}
-
-    timer_val = 300
-
-    # 1. Сначала ищем в ProjectRouteStage проекта
-    if device.project_id:
-        pr_stage = (
-            db.query(ProjectRouteStage)
-            .filter_by(
-                project_id=device.project_id,
-                device_type=device.device_type,
-            )
-            .filter(ProjectRouteStage.stage_key == stage_key, ProjectRouteStage.is_enabled == True)
-            .first()
-        )
-        if pr_stage and pr_stage.timer_seconds:
-            timer_val = pr_stage.timer_seconds
-        else:
-            # Проверяем stage_key с :: суффиксами (дубликаты этапов)
-            pr_stages = (
-                db.query(ProjectRouteStage)
-                .filter_by(project_id=device.project_id, device_type=device.device_type)
-                .filter(ProjectRouteStage.is_enabled == True)
-                .all()
-            )
-            for s in pr_stages:
-                base_key = s.stage_key.split('::')[0] if '::' in s.stage_key else s.stage_key
-                if base_key == stage_key and s.timer_seconds:
-                    timer_val = s.timer_seconds
-                    break
-            else:
-                # 2. Фолбек на глобальный RouteConfig
-                rc = (
-                    db.query(RouteConfig).filter_by(device_type=device.device_type).first()
-                    or db.query(RouteConfig).filter_by(is_default=True).first()
-                )
-                if rc:
-                    for st in rc.stages:
-                        if st.stage_key == stage_key and st.is_enabled:
-                            timer_val = st.timer_seconds if st.timer_seconds else 300
-                            break
-
+    timer_val = _get_stage_timer(db, device, stage_key)
     return {"timer_seconds": timer_val, "device_type": device.device_type, "project_id": device.project_id}
 
 
@@ -314,21 +303,6 @@ async def do_action(
     current_user: User = Depends(get_current_user)
 ):
     """Шаг 3: Действие с устройствами (Готово / Брак / Оставить / Полуфабрикат)."""
-    STATUS_MAP = {
-        'PRE_PRODUCTION': 'WAITING_ASSEMBLY',  # Комплектовка → Сборка
-        'KITTING': 'WAITING_ASSEMBLY',
-        'ASSEMBLY': 'WAITING_VIBROSTAND',
-        'VIBROSTAND': 'WAITING_TECH_CONTROL_1_1',
-        'TECH_CONTROL_1_1': 'WAITING_TECH_CONTROL_1_2',
-        'TECH_CONTROL_1_2': 'WAITING_FUNC_CONTROL',
-        'FUNC_CONTROL': 'WAITING_TECH_CONTROL_2_1',
-        'TECH_CONTROL_2_1': 'WAITING_TECH_CONTROL_2_2',
-        'TECH_CONTROL_2_2': 'WAITING_PACKING',
-        'PACKING': 'WAITING_ACCOUNTING',
-        'ACCOUNTING': 'WAITING_WAREHOUSE',
-        'WAREHOUSE': 'QC_PASSED',
-    }
-
     try:
         results = []
         action_type = data.action
@@ -385,31 +359,8 @@ async def do_action(
                 last_log = db.query(WorkLog).filter(WorkLog.device_id == device.id).order_by(WorkLog.created_at.desc()).first()
 
                 # Определяем cooldown (таймер) из проектного маршрута
-                cooldown_sec = None  # None = дефолт 5 мин
                 stage_key = old_status  # текущий этап (напр. ASSEMBLY)
-                if device.project_id and stage_key:
-                    pr_stage = (
-                        db.query(ProjectRouteStage)
-                        .filter_by(project_id=device.project_id, device_type=device.device_type)
-                        .filter(ProjectRouteStage.is_enabled == True)
-                        .all()
-                    )
-                    for ps in pr_stage:
-                        base_key = ps.stage_key.split('::')[0] if '::' in ps.stage_key else ps.stage_key
-                        if base_key == stage_key and ps.timer_seconds:
-                            cooldown_sec = ps.timer_seconds
-                            break
-                    if cooldown_sec is None:
-                        # Фолбек на глобальный маршрут
-                        rc = (
-                            db.query(RouteConfig).filter_by(device_type=device.device_type).first()
-                            or db.query(RouteConfig).filter_by(is_default=True).first()
-                        )
-                        if rc:
-                            for st in rc.stages:
-                                if st.stage_key == stage_key and st.is_enabled:
-                                    cooldown_sec = st.timer_seconds if st.timer_seconds else 300
-                                    break
+                cooldown_sec = _get_stage_timer(db, device, stage_key)
 
                 ok, msg = WorkflowEngine.can_change_status(
                     device, new_status, current_user, last_log,
@@ -491,33 +442,7 @@ async def do_action(
             if first_dev:
                 workplace = db.query(Workplace).get(data.workplace_id)
                 stage_key = workplace.workplace_type if workplace else None
-                timer_val = 300
-                # 1. Сначала ищем в ProjectRouteStage проекта
-                if first_dev.project_id and stage_key:
-                    pr_stage = (
-                        db.query(ProjectRouteStage)
-                        .filter_by(
-                            project_id=first_dev.project_id,
-                            device_type=first_dev.device_type,
-                        )
-                        .filter(ProjectRouteStage.stage_key == stage_key, ProjectRouteStage.is_enabled == True)
-                        .first()
-                    )
-                    if pr_stage and pr_stage.timer_seconds:
-                        timer_val = pr_stage.timer_seconds
-                    else:
-                        # 2. Фолбек на глобальный RouteConfig
-                        rc = (
-                            db.query(RouteConfig)
-                            .filter_by(device_type=first_dev.device_type).first()
-                            or db.query(RouteConfig).filter_by(is_default=True).first()
-                        )
-                        if rc:
-                            for st in rc.stages:
-                                if st.stage_key == stage_key and st.is_enabled:
-                                    timer_val = st.timer_seconds if st.timer_seconds else 300
-                                    break
-                stage_timer_seconds = timer_val
+                stage_timer_seconds = _get_stage_timer(db, first_dev, stage_key)
 
         ACTION_DISPLAYS = {
             'COMPLETED':         '✅ Готово',

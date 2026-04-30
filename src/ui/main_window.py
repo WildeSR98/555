@@ -21,6 +21,8 @@ from .device_status_tab import DeviceStatusTab
 from .analytics_tab import AnalyticsTab
 from .sn_pool_tab import SNPoolTab
 from .admin_tab import AdminPanelTab, PasswordVerifyDialog
+from .archive_tab import ArchiveTab
+from .route_configs_tab import RouteConfigsTab
 
 
 class MainWindow(QMainWindow):
@@ -54,6 +56,8 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(DeviceStatusTab(self.user), '🔍  Статус SN')
         self.tabs.addTab(SNPoolTab(), '🔢  Пул SN')
         self.tabs.addTab(AnalyticsTab(self.user), '📊  Аналитика')
+        self.tabs.addTab(ArchiveTab(self.user), '📦  Архив')
+        self.tabs.addTab(RouteConfigsTab(self.user), '📋  Маршруты')
 
         self.admin_tab_index = -1
         if self.user.role in [User.ROLE_ADMIN, User.ROLE_MANAGER, User.ROLE_SHOP_MANAGER] or self.user.is_superuser:
@@ -102,7 +106,7 @@ class MainWindow(QMainWindow):
         # Вид
         view_menu = menubar.addMenu('Вид')
 
-        tabs_names = ['Дашборд', 'Проекты', 'Конвейер', 'Сканирование', 'Статус SN', 'Пул SN', 'Аналитика']
+        tabs_names = ['Дашборд', 'Проекты', 'Конвейер', 'Сканирование', 'Статус SN', 'Пул SN', 'Аналитика', 'Архив', 'Маршруты']
         for i, tab_name in enumerate(tabs_names):
             action = QAction(tab_name, self)
             action.setData(i)

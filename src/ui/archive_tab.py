@@ -23,22 +23,24 @@ class ArchiveLoadWorker(QObject):
     def run(self):
         try:
             session = get_session()
-            projects = session.query(Project).filter(
-                Project.status == 'COMPLETED'
-            ).order_by(Project.updated_at.desc()).all()
+            try:
+                projects = session.query(Project).filter(
+                    Project.status == 'COMPLETED'
+                ).order_by(Project.updated_at.desc()).all()
 
-            data = []
-            for p in projects:
-                device_count = session.query(Device).filter(Device.project_id == p.id).count()
-                data.append({
-                    'id': p.id,
-                    'name': p.name,
-                    'code': p.code or '',
-                    'manager': p.manager.full_name if p.manager else '—',
-                    'device_count': device_count,
-                    'archived_at': p.updated_at.strftime('%d.%m.%Y %H:%M') if p.updated_at else '—',
-                })
-            session.close()
+                data = []
+                for p in projects:
+                    device_count = session.query(Device).filter(Device.project_id == p.id).count()
+                    data.append({
+                        'id': p.id,
+                        'name': p.name,
+                        'code': p.code or '',
+                        'manager': p.manager.full_name if p.manager else '—',
+                        'device_count': device_count,
+                        'archived_at': p.updated_at.strftime('%d.%m.%Y %H:%M') if p.updated_at else '—',
+                    })
+            finally:
+                session.close()
             self.finished.emit(data)
         except Exception as e:
             self.error.emit(str(e))
@@ -56,35 +58,36 @@ class ArchiveLogsWorker(QObject):
     def run(self):
         try:
             session = get_session()
-            devices = session.query(Device).filter(
-                Device.project_id == self.project_id
-            ).order_by(Device.name).all()
+            try:
+                devices = session.query(Device).filter(
+                    Device.project_id == self.project_id
+                ).order_by(Device.name).all()
 
-            result = []
-            for dev in devices:
-                logs = session.query(WorkLog).filter(
-                    WorkLog.device_id == dev.id
-                ).order_by(WorkLog.created_at.asc()).all()
+                result = []
+                for dev in devices:
+                    logs = session.query(WorkLog).filter(
+                        WorkLog.device_id == dev.id
+                    ).order_by(WorkLog.created_at.asc()).all()
 
-                log_entries = []
-                for log in logs:
-                    log_entries.append({
-                        'created_at': log.created_at.strftime('%d.%m.%Y %H:%M:%S') if log.created_at else '—',
-                        'action': log.action_display,
-                        'action_raw': log.action,
-                        'old_status': Device.STATUS_DISPLAY.get(log.old_status, log.old_status or ''),
-                        'new_status': Device.STATUS_DISPLAY.get(log.new_status, log.new_status or ''),
-                        'notes': log.notes or '—',
-                        'worker': log.worker.full_name if log.worker else '—',
+                    log_entries = []
+                    for log in logs:
+                        log_entries.append({
+                            'created_at': log.created_at.strftime('%d.%m.%Y %H:%M:%S') if log.created_at else '—',
+                            'action': log.action_display,
+                            'action_raw': log.action,
+                            'old_status': Device.STATUS_DISPLAY.get(log.old_status, log.old_status or ''),
+                            'new_status': Device.STATUS_DISPLAY.get(log.new_status, log.new_status or ''),
+                            'notes': log.notes or '—',
+                            'worker': log.worker.full_name if log.worker else '—',
+                        })
+
+                    result.append({
+                        'device_name': dev.name,
+                        'serial_number': dev.serial_number or '—',
+                        'logs': log_entries,
                     })
-
-                result.append({
-                    'device_name': dev.name,
-                    'serial_number': dev.serial_number or '—',
-                    'logs': log_entries,
-                })
-
-            session.close()
+            finally:
+                session.close()
             self.finished.emit(result)
         except Exception as e:
             self.error.emit(str(e))

@@ -45,6 +45,8 @@ DEVICE_STATUS_COLORS = {
     'WAITING_SOFTWARE': '#f59e0b',
     'PACKING': '#14b8a6',
     'ACCOUNTING': '#8b5cf6',
+    'WAITING_WAREHOUSE': '#0284c7',
+    'WAREHOUSE': '#0ea5e9',
     'SHIPPED': '#059669',
     'ACTIVE': '#22c55e',
     'INACTIVE': '#6b7280',

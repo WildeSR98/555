@@ -5,7 +5,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
     QTableWidget, QTableWidgetItem, QHeaderView, QScrollArea,
-    QGridLayout, QPushButton, QLineEdit
+    QGridLayout, QPushButton, QLineEdit, QListWidget, QListWidgetItem
 )
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QObject
 from PyQt6.QtGui import QFont
@@ -78,6 +78,20 @@ class DashboardLoadWorker(QObject):
                     'wp_name': sess.workplace.name if sess.workplace else '?',
                     'start_time': sess.started_at.strftime('%H:%M') if sess.started_at else '?',
                     'duration': duration
+                })
+
+            # 4. Последние 8 действий (Activity Feed)
+            recent_logs = session.query(WorkLog).order_by(
+                WorkLog.created_at.desc()
+            ).limit(8).all()
+            data['recent_logs'] = []
+            for log in recent_logs:
+                data['recent_logs'].append({
+                    'worker': log.worker.full_name if log.worker else '?',
+                    'action': log.action_display,
+                    'sn': log.serial_number or '—',
+                    'time': log.created_at.strftime('%H:%M') if log.created_at else '?',
+                    'action_raw': log.action,
                 })
 
             session.close()
@@ -187,6 +201,24 @@ class DashboardTab(QWidget):
 
         layout.addLayout(content)
 
+        # Activity Feed
+        feed_title = QLabel('⚡ Последние действия')
+        feed_title.setStyleSheet('font-size: 16px; font-weight: 600; margin-top: 4px;')
+        layout.addWidget(feed_title)
+
+        self.feed_list = QListWidget()
+        self.feed_list.setMaximumHeight(180)
+        self.feed_list.setStyleSheet(f"""
+            QListWidget {{
+                background: {COLORS['bg_surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 8px;
+            }}
+            QListWidget::item {{ padding: 6px 12px; border-bottom: 1px solid {COLORS['border']}; }}
+            QListWidget::item:last-child {{ border-bottom: none; }}
+        """)
+        layout.addWidget(self.feed_list)
+
     def _create_summary_card(self, title: str, value: str, color: str) -> QFrame:
         """Создание сводной карточки."""
         card = QFrame()
@@ -274,6 +306,32 @@ class DashboardTab(QWidget):
             self.sessions_table.setItem(i, 1, QTableWidgetItem(sess['wp_name']))
             self.sessions_table.setItem(i, 2, QTableWidgetItem(sess['start_time']))
             self.sessions_table.setItem(i, 3, QTableWidgetItem(sess['duration']))
+
+        # 4. Activity Feed
+        action_icons = {
+            'COMPLETED': '✅', 'SCAN_IN': '🟦', 'DEFECT': '🔴',
+            'WAITING_PARTS': '🟡', 'REASSIGNED': '🔄', 'CANCEL_ACTION': '⏪',
+            'MAKE_SEMIFINISHED': '🔧',
+        }
+        action_colors = {
+            'COMPLETED':        '#22c55e',
+            'SCAN_IN':          '#818cf8',
+            'DEFECT':           '#ef4444',
+            'MAKE_SEMIFINISHED':'#f59e0b',
+            'CANCEL_ACTION':    '#94a3b8',
+            'REASSIGNED':       '#06b6d4',
+        }
+        from PyQt6.QtGui import QColor
+        self.feed_list.clear()
+        for log in data.get('recent_logs', []):
+            icon = action_icons.get(log['action_raw'], '●')
+            text = f"{icon}  {log['time']}  {log['worker']} — {log['action']}  [{log['sn']}]"
+            item = QListWidgetItem(text)
+            color = action_colors.get(log['action_raw'], COLORS['text_secondary'])
+            item.setForeground(QColor(color))
+            self.feed_list.addItem(item)
+        if not data.get('recent_logs'):
+            self.feed_list.addItem('Нет действий')
 
     def _on_load_error(self, error_msg: str) -> None:
         print(f'Dashboard refresh error: {error_msg}')

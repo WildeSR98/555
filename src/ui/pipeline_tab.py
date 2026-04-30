@@ -87,6 +87,7 @@ class PipelineTab(QWidget):
             ('WAITING_TECH_CONTROL_2_2', 'TECH_CONTROL_2_2', 'ОТК 2.2'),
             ('WAITING_PACKING', 'PACKING', 'Упаковка'),
             ('WAITING_ACCOUNTING', 'ACCOUNTING', 'Учёт'),
+            ('WAITING_WAREHOUSE', 'WAREHOUSE', 'Склад'),
         ]
 
 
@@ -107,11 +108,11 @@ class PipelineTab(QWidget):
 
         # Дополнительные статусы (строка 1)
         extra_stages = [
-            ('QC_PASSED', 'Контроль пройден'),
+            ('QC_PASSED', 'Склад (Завершено)'),
             ('SHIPPED', 'Отгружено'),
             ('DEFECT', 'Брак'),
-            ('WAITING_PARTS', 'Ожидание запчастей'),
-            ('WAITING_SOFTWARE', 'Ожидание ПО'),
+            ('WAITING_PARTS', 'Ожид. запчастей'),
+            ('WAITING_SOFTWARE', 'Ожид. ПО'),
         ]
 
         extra_label = QLabel('СТАТУСЫ ↓')
