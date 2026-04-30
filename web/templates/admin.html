@@ -505,7 +505,7 @@ function buildNavPermTable(currentPerms) {
     // Header
     const thead = document.getElementById('navPermHead');
     thead.innerHTML = '<tr><th>Роль / Вкладка</th>' +
-        NAV_TABS.map(t => `<th style="text-align:center; font-size:11px; writing-mode:vertical-rl; padding:6px 4px;">${t.label}</th>`).join('') +
+        NAV_TABS.map(t => `<th style="text-align:center; font-size:11px; padding:6px 8px; white-space:nowrap;">${t.label}</th>`).join('') +
         '</tr>';
 
     // Body: one row per role
