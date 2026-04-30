@@ -316,7 +316,8 @@
             if (!container) return;
             const toast = document.createElement('div');
             toast.className = 'ws-toast';
-            toast.style.cssText = 'border:2px solid #f59e0b; background:#1c1a12; min-width:300px;';
+            toast.style.cssText = 'border:2px solid #f59e0b; background:var(--card-bg); min-width:300px;';
+
             toast.innerHTML = `
                 <div class="ws-toast-title" style="color:#f59e0b; font-size:15px;">
                     📢 Объявление
