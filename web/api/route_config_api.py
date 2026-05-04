@@ -201,6 +201,9 @@ async def update_route_config(
         s.stage_key: s.timer_seconds if s.timer_seconds else 300
         for s in rc.stages if s.is_enabled
     }
+    # Alias: frontend использует workplace_type (PRE_PRODUCTION), а route stage_key = KITTING
+    if 'KITTING' in stages_data:
+        stages_data['PRE_PRODUCTION'] = stages_data['KITTING']
     await ws_manager.broadcast({
         "type":       "route_saved",
         "id":         rc.id,

@@ -72,6 +72,9 @@ def _get_stage_timer(
     """Получить таймер этапа для устройства: ProjectRouteStage → RouteConfig → default."""
     if not device or not stage_key:
         return default
+    # Нормализация: workplace_type → route stage_key (PRE_PRODUCTION → KITTING)
+    _WP_TO_ROUTE = {'PRE_PRODUCTION': 'KITTING'}
+    route_key = _WP_TO_ROUTE.get(stage_key, stage_key)
     if device.project_id:
         # 1. Проектный маршрут
         pr_stages = (
@@ -82,7 +85,7 @@ def _get_stage_timer(
         )
         for s in pr_stages:
             base = s.stage_key.split('::')[0] if '::' in s.stage_key else s.stage_key
-            if base == stage_key and s.timer_seconds:
+            if base == route_key and s.timer_seconds:
                 return s.timer_seconds
     # 2. Глобальный RouteConfig
     rc = (
@@ -91,7 +94,7 @@ def _get_stage_timer(
     )
     if rc:
         for st in rc.stages:
-            if st.stage_key == stage_key and st.is_enabled:
+            if st.stage_key == route_key and st.is_enabled:
                 return st.timer_seconds if st.timer_seconds else default
     return default
 
@@ -291,6 +294,7 @@ def process_batch(
             "device_ids": [d.id for d in valid_devices],
             "devices": [
                 {"id": d.id, "sn": d.serial_number, "name": d.name, "status": d.status,
+                 "project_id": d.project_id,
                  "need_scan_in": d in to_scan_in}
                 for d in valid_devices
             ],

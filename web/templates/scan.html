@@ -194,7 +194,8 @@ let state = {
     batchLimit: 1,
     stageTimerSeconds: 300,  // таймер этапа (из маршрутного листа)
     timerStartedAt: null,    // timestamp начала таймера (для восстановления)
-    devices: [],          // {id, sn, name, status, needScanIn}
+    currentProjectId: null,  // project_id текущего устройства (для фильтрации WS-таймеров)
+    devices: [],          // {id, sn, name, status, projectId, needScanIn}
     phase: 'accept',      // 'accept' — нужно принять в работу, 'action' — можно закрывать
     verifiedProjectIds: [],
     pendingScan: null,
@@ -245,6 +246,7 @@ function saveState() {
         lastFeedback: state.lastFeedback,
         stageTimerSeconds: state.stageTimerSeconds,
         timerStartedAt: state.timerStartedAt,
+        currentProjectId: state.currentProjectId,
     };
     try { sessionStorage.setItem(SCAN_STATE_KEY, JSON.stringify(toSave)); } catch(e) {}
 }
@@ -273,6 +275,7 @@ function restoreState() {
         state.lastFeedback   = data.lastFeedback || null;
         state.stageTimerSeconds = data.stageTimerSeconds || 300;
         state.timerStartedAt   = data.timerStartedAt || null;
+        state.currentProjectId = data.currentProjectId || null;
 
         document.getElementById('lblWorker').textContent    = state.workerName;
         document.getElementById('lblWorkplace').textContent = state.workplaceName;
@@ -601,10 +604,16 @@ async function processScan(e) {
                             sn: dev.sn,
                             name: dev.name,
                             status: dev.status,
+                            projectId: dev.project_id,
                             needScanIn: dev.need_scan_in === true
                         });
                     }
                 });
+
+                // Устанавливаем project_id текущего устройства для фильтрации WS-таймеров
+                if (state.devices.length > 0 && state.devices[0].projectId) {
+                    state.currentProjectId = state.devices[0].projectId;
+                }
 
                 // Определяем фазу по флагу need_scan_in
                 const anyNeedScanIn = res.devices.some(d => d.need_scan_in);
@@ -703,6 +712,7 @@ function renderDevices() {
     if (state.devices.length === 0) {
         tbody.innerHTML = '<tr id="emptyRow"><td colspan="3" class="text-center text-muted">Нет устройств в буфере</td></tr>';
         updateSelectedCount();
+        state.currentProjectId = null;
         hideStageTimer();  // ← скрываем таймер когда буфер пуст
         saveState();
         return;
@@ -1126,6 +1136,8 @@ function _updateTimerDisplay() {
 
 function _handleTimerWsUpdate(detail, source) {
     if (!state.sessionId || !state.workplaceType) return;
+    // Фильтрация по project_id: обновляем таймер только если на посту устройство из этого проекта
+    if (detail.project_id && state.currentProjectId && detail.project_id !== state.currentProjectId) return;
     const stages = detail.stages;
     if (!stages) return;
     const stageKey = state.workplaceType;

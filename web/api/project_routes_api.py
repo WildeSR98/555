@@ -359,6 +359,9 @@ async def save_project_device_route(
         (s.stage_key.split('::')[0] if '::' in s.stage_key else s.stage_key): (s.timer_seconds or 300)
         for s in saved_stages if s.is_enabled
     }
+    # Alias: frontend использует workplace_type (PRE_PRODUCTION), а route stage_key = KITTING
+    if 'KITTING' in stages_timers:
+        stages_timers['PRE_PRODUCTION'] = stages_timers['KITTING']
 
     await ws_manager.broadcast({
         "type":         "project_route_saved",

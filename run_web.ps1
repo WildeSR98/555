@@ -1,6 +1,6 @@
 # Production Manager — Web Server
 param(
-    [string]$ServerHost = "127.0.0.1",
+    [string]$ServerHost = "0.0.0.0",
     [int]$Port = 8000,
     [switch]$Reload
 )

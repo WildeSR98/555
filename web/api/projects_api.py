@@ -13,7 +13,7 @@ from datetime import datetime
 from src.database import get_db
 from src.models import (
     Project, Device, Operation, SerialNumber, DeviceModel, User,
-    WorkLog, ProjectRoute, RouteConfig,
+    WorkLog, ProjectRoute, ProjectRouteStage, RouteConfig,
     MacAddress, DUAL_MAC_CATEGORIES, SINGLE_MAC_CATEGORIES,
 )
 from web.dependencies import get_current_user
@@ -622,6 +622,18 @@ async def delete_project(
         # Manually delete all worklogs for devices in this project before deleting project
         db.query(WorkLog).filter(WorkLog.project_id == project_id).delete(synchronize_session=False)
         
+        # Delete project-specific route stages (pm_project_route_stage)
+        db.query(ProjectRouteStage).filter(ProjectRouteStage.project_id == project_id).delete(synchronize_session=False)
+
+        # Delete project route assignment (pm_project_route)
+        db.query(ProjectRoute).filter(ProjectRoute.project_id == project_id).delete(synchronize_session=False)
+
+        # Release MAC addresses back to the pool
+        db.query(MacAddress).filter(MacAddress.project_id == project_id).update(
+            {MacAddress.is_used: False, MacAddress.device_id: None, MacAddress.project_id: None},
+            synchronize_session=False,
+        )
+
         # Clear device ID references in serial numbers so they aren't deleted/failed on cascade
         db.execute(SerialNumber.__table__.update().where(
             SerialNumber.device_id.in_(
